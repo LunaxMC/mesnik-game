@@ -76,29 +76,74 @@
   window.addEventListener('resize', resize); resize();
 
   const TILE = 40;
-  const MAP = [
-    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,0,1,1,0,1,1,0,0,1,1,0,1,1,0,1],
-    [1,0,1,0,0,0,1,0,0,1,0,0,0,1,0,1],
-    [1,0,0,0,1,0,0,0,0,0,0,1,0,0,0,1],
-    [1,0,1,0,1,2,0,1,1,0,2,1,0,1,0,1],
-    [1,0,1,0,0,0,0,0,0,0,0,0,0,1,0,1],
-    [1,0,0,0,1,1,0,2,2,0,1,1,0,0,0,1],
-    [1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1],
-    [1,0,0,0,1,0,1,0,0,1,0,1,0,0,0,1],
-    [1,0,1,0,0,0,2,0,0,2,0,0,0,1,0,1],
-    [1,0,1,1,0,1,1,0,0,1,1,0,1,1,0,1],
-    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  // Карта: # стена, . пол, C шкаф, D дверь (закрытая). Открывается клавишей E.
+  const MAP_STR = [
+    "###############################################",
+    "#.........#.........#.........#.........#.....#",
+    "#.#######.#.#######.#.#####.###.#####.###.#...#",
+    "#.#.....#...#.....#.#.#...#.#.#.#...#.#.#.#...#",
+    "#.#.###D###.###.###D###.###.###.###D###.#.#...#",
+    "#.#C..#.....#.....#.....#.....#.....#...#.#...#",
+    "#.#####.#.#####.#####.#####D#####.#####.#.#####",
+    "#.....#.#.....#.......#.......#.......#.#.....#",
+    "#####.#D#####.#.###D###.###.#####.#####.#.#####",
+    "#.....#.........#.#.....#.#.....#.....#.#.....#",
+    "#.#####.#####.#####.#####D#####.#####.#.#.#####",
+    "#.#...#.#.....#.....#.....#.....#.......#.....#",
+    "#.#.#D#.#.###D#########.#####.#####.#####.#####",
+    "#.#.#.#...#.....#.......#.......#.....#.#.....#",
+    "#.#.#.#####.###...#.#####.#####.#.#.#####.#.###",
+    "#.#.#.....#.#...#.#.#.....#.#...#.#.#.....#.#.#",
+    "#.#.#####.#.#.###D#.###D###.#.##.#D#.#####.#.#.",
+    "#.#.....#...#.....#.#.....#.#.....#.#.......#.#",
+    "###.#####D#####.#####.#####D#.##.###.#####.###",
+    "#.....#.....#...#.......#.....#.#.#.#.#.....#.#",
+    "#.#####.###D###.#####.#####D#.#.#.#.#.###.#####",
+    "#.#...#.#.....#.#.....#.....#.#.#.#.#.....#...#",
+    "#.#.#.#.#.#####D#.#####.###D#.###.#.###########",
+    "#.#.#.#.#.......#.#.....#.....#.....#.........#",
+    "#.#C#.####.#####.#####.#############.#####.####",
+    "#.#.#.#.#...#.........#...................#...#",
+    "#.#.#.#.#.#####.#####.#####.#####.#####D###.###",
+    "#.#...#.#...#...#.....#.....#.....#.....#.....#",
+    "#.#####.#####D###.###.#####D###.###########.###",
+    "#.....#.........#...#.....#...#.........#.....#",
+    "###.###.#######D#.###D#######D#.#####D###.#####",
+    "#.....#.#.....#.#.#.....#.....#.#.#.#.#.....#.#",
+    "#.#####.#.#####.#.#D###.#####.###D#.#.###.#####",
+    "#.#.....#.#.......#...#.#.....#.....#.#...#...#",
+    "#D#.#####D###.#####.###.#####.#####D#.###D#.###",
+    "#.#.#.....#...#.....#.....#.....#.....#...#.#.#",
+    "#.#.#.###.#.#.#####.#####.#######.#####.#.#.#.#",
+    "#.#.#.#.#.#.#.#.....#.....#.....#.....#.#.#.#.#",
+    "#.#C#.#.#.#.#.#.#####D###.#####.#####D#.#.#.#.#",
+    "#.#.#.#.#.#.#.#.....#...#.#.....#.....#.#.#.#.#",
+    "#.#.#.###.#.#.#####.###.#.#####D###.#####.#.#.#",
+    "#.#.#.....#.#.....#.#...#.#.....#.....#.#.#.#.#",
+    "#.###########.#####.#.###.#.#####.#####.#.#.#.#",
+    "#.............#.....#...#.#.......#.....#.#.#.#",
+    "#.###################.###.#####.#.#.#####.#.#.#",
+    "#.#.................#.....#.....#.#.#...#.#.#.#",
+    "#.#.#############.#.#######.###D#.#.#.#.#####.#",
+    "#.#.#...........#.#.......#.....#.#.#.......#.#",
+    "#.#.#.#########.#.#########D#####.###.#######.#",
+    "#...#...........#.............#.........#.....#",
+    "###############################################",
   ];
-  const COLS = MAP[0].length, ROWS = MAP.length;
+  const COLS = MAP_STR[0].length, ROWS = MAP_STR.length;
   const MW = COLS*TILE, MH = ROWS*TILE;
-  const MAP_ORIGINAL = MAP.map(r => r.slice()); // эталон: чтобы восстанавливать блоки
+
+  // Текущая изменяемая карта: символы -> числа 0/1/C/D
+  const MAP = MAP_STR.map(row => row.split('').map(ch =>
+    ch==='#' ? 1 : ch==='C' ? 2 : ch==='D' ? 3 : 0
+  ));
+  const MAP_ORIGINAL = MAP.map(r => r.slice()); // эталон для восстановления
 
   function insideMap(tx,ty){ return tx>=0 && ty>=0 && tx<COLS && ty<ROWS; }
   function isWall(tx,ty){ return !insideMap(tx,ty) || MAP[ty][tx]===1; }
   function isCloset(tx,ty){ return insideMap(tx,ty) && MAP[ty][tx]===2; }
+  function isDoor(tx,ty){ return insideMap(tx,ty) && MAP[ty][tx]===3; }
+  function isBlocking(tx,ty){ return isWall(tx,ty) || isDoor(tx,ty); }
 
   // ---- РЕЖИМЫ ----
   const MODES = {
@@ -133,9 +178,9 @@
     for(const k in damage) delete damage[k];
   }
 
-  const player = { x:TILE*2+20, y:TILE*7+20, r:12, speed:200, runMult:1.7, inCloset:null };
-  const butcher = { x:TILE*13+20, y:TILE*12+20, r:16, speed:118, chaseSpeed:150, catchDist:22, viewDist:300, heardCooldown:0, lastSeen:null, chaseTimer:0, axeTimer:0, axeTarget:null, axeTrail:0, axeDir:0 };
-  const swat = { x:TILE*2, y:TILE*11, r:10, arrived:false };
+  const player = { x:TILE*2+20, y:TILE*1+20, r:12, speed:200, runMult:1.7, inCloset:null };
+  const butcher = { x:TILE*46+20, y:TILE*1+20, r:16, speed:118, chaseSpeed:150, catchDist:22, viewDist:300, heardCooldown:0, lastSeen:null, chaseTimer:0, axeTimer:0, axeTarget:null, axeTrail:0, axeDir:0 };
+  const swat = { x:TILE*3, y:TILE*1, r:10, arrived:false };
 
   let currentMode = null;
   let timeLeft = 90;
@@ -152,7 +197,7 @@
 
   document.addEventListener('keydown', e => {
     keys[e.code]=true;
-    if (e.code==='KeyE' && state==='playing' && !godMode) toggleCloset();
+    if (e.code==='KeyE' && state==='playing' && !godMode) interactE();
     if (e.code==='Shift') e.preventDefault();
     if (e.code==='KeyT' && state==='playing' && !godMode) activateGod();
   });
@@ -160,7 +205,7 @@
 
   function hasLineOfSight(x1,y1,x2,y2){
     const steps = Math.ceil(Math.hypot(x2-x1,y2-y1)/(TILE/2));
-    for(let i=1;i<=steps;i++){ const t=i/steps; const px=x1+(x2-x1)*t, py=y1+(y2-y1)*t; const tx=Math.floor(px/TILE), ty=Math.floor(py/TILE); if(isWall(tx,ty)) return false; if(isCloset(tx,ty)) return false; }
+    for(let i=1;i<=steps;i++){ const t=i/steps; const px=x1+(x2-x1)*t, py=y1+(y2-y1)*t; const tx=Math.floor(px/TILE), ty=Math.floor(py/TILE); if(isWall(tx,ty)) return false; if(isCloset(tx,ty)) return false; if(isDoor(tx,ty)) return false; }
     return true;
   }
 
@@ -173,12 +218,24 @@
     if(best){ player.inCloset=best; player.x=best.nx*TILE+TILE/2; player.y=best.ny*TILE+TILE/2; }
   }
 
+  // Действие по клавише E: ищем дверь рядом -> открыть её; иначе шкаф
+  function interactE(){
+    // сначала вылезаем из шкафа, если сидим в нём
+    if(player.inCloset){ player.inCloset=null; return; }
+    const tx=Math.floor(player.x/TILE), ty=Math.floor(player.y/TILE);
+    const dirs=[[1,0],[-1,0],[0,1],[0,-1],[0,0]];
+    let bestDoor=null, bd=99;
+    for(const [dx,dy] of dirs){ const nx=tx+dx, ny=ty+dy; if(isDoor(nx,ny) && !player.inCloset){ const d=Math.hypot(player.x-(nx*TILE+TILE/2),player.y-(ny*TILE+TILE/2)); if(d<bd){bd=d;bestDoor={nx,ny};} } }
+    if(bestDoor){ MAP[bestDoor.ny][bestDoor.nx]=0; butcher.axeTrail=0.2; butcher.axeTarget=bestDoor; return; }
+    toggleCloset();
+  }
+
   function dist(ax,ay,bx,by){ return Math.hypot(bx-ax,by-ay); }
 
   function circleHitsWall(cx,cy,r){
     const tx1=Math.floor((cx-r)/TILE), tx2=Math.floor((cx+r)/TILE);
     const ty1=Math.floor((cy-r)/TILE), ty2=Math.floor((cy+r)/TILE);
-    for(let ty=ty1;ty<=ty2;ty++) for(let tx=tx1;tx<=tx2;tx++) if(isWall(tx,ty)) return true;
+    for(let ty=ty1;ty<=ty2;ty++) for(let tx=tx1;tx<=tx2;tx++) if(isBlocking(tx,ty)) return true;
     return false;
   }
 
@@ -190,8 +247,11 @@
     if(circleHitsWall(nx,ny,butcher.r)){
       const tx=Math.floor((butcher.x+Math.cos(dir)*butcher.r*1.5)/TILE);
       const ty=Math.floor((butcher.y+Math.sin(dir)*butcher.r*1.5)/TILE);
-      // Старый Бог ломает касанием
-      if(currentMode.touch && insideMap(tx,ty) && (MAP[ty][tx]===1||MAP[ty][tx]===2)){ MAP[ty][tx]=0; butcher.axeTrail=0.25; butcher.axeTarget={tx,ty}; }
+      // Старый Бог ломает касанием (стены, шкафы, двери)
+      if(currentMode.touch && insideMap(tx,ty) && (MAP[ty][tx]===1||MAP[ty][tx]===2||MAP[ty][tx]===3)){ MAP[ty][tx]=0; butcher.axeTrail=0.25; butcher.axeTarget={tx,ty}; }
+
+      // дверь мясник вышибает с одного удара топором
+      if(insideMap(tx,ty) && isDoor(tx,ty)){ trySwingAxe(tx,ty,dir); return; }
 
       if(tileHp(tx,ty)>0 && insideMap(tx,ty)){ trySwingAxe(tx,ty,dir); return; }
       for(let i=0;i<8;i++){ butcher.ang+=Math.PI/4; nx=butcher.x+Math.cos(butcher.ang)*speed*dt; ny=butcher.y+Math.sin(butcher.ang)*speed*dt; if(!circleHitsWall(nx,ny,butcher.r)) break; }
@@ -203,6 +263,8 @@
   function trySwingAxe(tx,ty,dir){
     if(butcher.axeTimer>0) return;
     butcher.axeTimer=0.5; butcher.axeTarget={tx,ty}; butcher.axeDir=dir;
+    // дверь вышибается с одного удара
+    if(insideMap(tx,ty) && isDoor(tx,ty)){ MAP[ty][tx]=0; butcher.axeTrail=0.3; return; }
     if(damageTile(tx,ty)) butcher.axeTrail=0.3;
   }
 
@@ -442,9 +504,17 @@
           ctx.moveTo(tx*TILE+10,ty*TILE+10);ctx.lineTo(tx*TILE+24,ty*TILE+24);ctx.moveTo(tx*TILE+24,ty*TILE+8);ctx.lineTo(tx*TILE+12,ty*TILE+30);
           ctx.stroke();
         }
+      } else if(MAP[ty][tx]===3){
+        // дверь (закрытая)
+        ctx.fillStyle='#5a3a20'; ctx.fillRect(tx*TILE+4,ty*TILE+4,TILE-8,TILE-8);
+        ctx.strokeStyle='#2a1a0e'; ctx.lineWidth=2; ctx.strokeRect(tx*TILE+4,ty*TILE+4,TILE-8,TILE-8);
+        ctx.fillStyle='#7a5230';
+        ctx.fillRect(tx*TILE+6,ty*TILE+6,TILE-12,4);
+        ctx.fillRect(tx*TILE+6,ty*TILE+12,TILE-12,4);
+        // ручка
+        ctx.fillStyle='#c8a25a'; ctx.beginPath(); ctx.arc(tx*TILE+8,ty*TILE+TILE/2,2,0,Math.PI*2); ctx.fill();
       }
     }
-
     if(swat.arrived) drawSoldier(swat.x, swat.y);
     drawPlayer();
     drawButcher();
