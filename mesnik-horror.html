@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Мясник — продержись до спецназа</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: #000; overflow: hidden; font-family: 'Courier New', monospace; color: #cdcdcd; }
+  #game { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+  #hud { position: fixed; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: 12px 18px; pointer-events: none; z-index: 5; text-shadow: 0 0 6px #000; font-size: 16px; }
+  #hud .timer { font-size: 30px; font-weight: bold; letter-spacing: 2px; }
+  #hud .timer.danger { color: #ff3b3b; }
+  #hud .panic { font-size: 22px; font-weight: bold; color: #ff3b3b; opacity: 0; transition: opacity 0.2s; }
+  #hud .panic.on { opacity: 1; }
+  #overlay { position: fixed; top:0; left:0; right:0; bottom:0; background: radial-gradient(ellipse at center, rgba(0,0,0,0.8), #000 78%); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; z-index: 10; padding: 20px; }
+  #overlay h1 { font-size: 42px; color: #ff2a2a; letter-spacing: 6px; margin-bottom: 8px; text-shadow: 0 0 20px #900; }
+  #overlay .sub { color: #bbb; margin-bottom: 24px; max-width: 560px; line-height: 1.5; }
+  #overlay .keys { font-size: 14px; color: #999; line-height: 1.8; margin-top: 8px; }
+  #overlay .keys b { color: #eee; }
+  #overlay.win h1 { color: #7dff7d; text-shadow: 0 0 20px #0a6; }
+  #overlay.win .sub span { color: #9cff9c; }
+  #overlay.hidden { display: none; }
+  .foot { margin-top: 20px; font-size: 12px; color: #555; }
+  #modeTag { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); font-size: 14px; color: #888; letter-spacing: 3px; text-shadow: 0 0 6px #000; pointer-events: none; z-index: 5; }
+  .diff-title { font-size: 15px; color: #eee; letter-spacing: 3px; margin-bottom: 12px; }
+  .diff-panel { display: flex; flex-direction: column; gap: 8px; width: 480px; max-width: 94vw; }
+  .diff-btn { background: #161616; color: #ddd; border: 1px solid #333; padding: 9px 14px; font-family: inherit; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 12px; text-align: left; transition: all .15s; }
+  .diff-btn:hover { background: #2a0a0a; border-color: #ff2a2a; transform: translateX(3px); }
+  .diff-btn .d-label { font-weight: bold; letter-spacing: 2px; white-space: nowrap; min-width: 90px; color: #fff; }
+  .diff-btn .d-desc { font-size: 11px; color: #888; line-height: 1.3; flex: 1; }
+  .diff-btn .d-time { color: #ff6060; font-size: 13px; white-space: nowrap; }
+  .overlay-actions { display: flex; gap: 12px; margin-top: 14px; }
+  .overlay-actions button { background: #3a0000; color: #fff; border: 1px solid #ff2a2a; padding: 12px 30px; font-size: 16px; font-family: inherit; cursor: pointer; letter-spacing: 2px; }
+  .overlay-actions button:hover { background: #600002; }
+  .overlay-actions .ghost { background: transparent; border-color: #666; color: #bbb; }
+  .overlay-actions .ghost:hover { border-color: #aaa; color: #fff; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <div class="status"><div id="panicMsg" class="panic">⚠ ОН ВИДИТ ТЕБЯ</div><div id="godMsg" style="font-size:20px;color:#ff2a00;font-weight:bold;opacity:0;transition:opacity .2s;text-shadow:0 0 10px #ff2a00;">☠ ТЫ БОГ — ДОГОНИ ЕГО</div></div>
+  <div class="timer" id="timer">1:30</div>
+</div>
+<div id="modeTag"></div>
+
+<div id="overlay">
+  <h1>МЯСНИК</h1>
+  <div class="sub">Ты спрятался в заброшенной бойне. Продержись до приезда спецназа. Выбери режим — от почти безобидного до божественного ужаса.</div>
+  <div class="diff-title">— ВЫБЕРИ СЛОЖНОСТЬ —</div>
+  <div class="diff-panel">
+    <button class="diff-btn" data-d="peaceful"><span class="d-label">МИРНЫЙ</span><span class="d-desc">Не ломает стены, не знает где ты. Неторопливый.</span><span class="d-time">100с</span></button>
+    <button class="diff-btn" data-d="easy"><span class="d-label">ЛЁГКИЙ</span><span class="d-desc">Ломает стены и шкафы за 4 удара. Бежит, когда видит тебя.</span><span class="d-time">90с</span></button>
+    <button class="diff-btn" data-d="medium"><span class="d-label">СРЕДНИЙ</span><span class="d-desc">В 2.5 раза быстрее. Ломает за 2 удара.</span><span class="d-time">90с</span></button>
+    <button class="diff-btn" data-d="hard"><span class="d-label">СЛОЖНЫЙ</span><span class="d-desc">В 5 раз быстрее. Ломает за 1 удар. Всегда знает где ты.</span><span class="d-time">45с</span></button>
+    <button class="diff-btn" data-d="god"><span class="d-label">СТАРЫЙ БОГ</span><span class="d-desc">В 11 раз быстрее. Знает всё. Ломает при касании.</span><span class="d-time">45с</span></button>
+  </div>
+  <div class="keys"><b>W A S D</b> — движение · <b>Shift</b> — бег · <b>E</b> — в шкаф / из шкафа</div>
+  <div class="foot">Спецназ приедет. Вопрос лишь — доживёшь ли ты.</div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const overlay = document.getElementById('overlay');
+  const timerEl = document.getElementById('timer');
+  const panicEl = document.getElementById('panicMsg');
+  const godMsgEl = document.getElementById('godMsg');
+  const modeTag = document.getElementById('modeTag');
+
+  let W = 800, H = 600;
+  function resize(){ const dpr=window.devicePixelRatio||1; W=window.innerWidth; H=window.innerHeight; canvas.width=W*dpr; canvas.height=H*dpr; canvas.style.width=W+'px'; canvas.style.height=H+'px'; ctx.setTransform(dpr,0,0,dpr,0,0); }
+  window.addEventListener('resize', resize); resize();
+
+  const TILE = 40;
+  const MAP = [
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,1,1,0,1,1,0,0,1,1,0,1,1,0,1],
+    [1,0,1,0,0,0,1,0,0,1,0,0,0,1,0,1],
+    [1,0,0,0,1,0,0,0,0,0,0,1,0,0,0,1],
+    [1,0,1,0,1,2,0,1,1,0,2,1,0,1,0,1],
+    [1,0,1,0,0,0,0,0,0,0,0,0,0,1,0,1],
+    [1,0,0,0,1,1,0,2,2,0,1,1,0,0,0,1],
+    [1,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1],
+    [1,0,0,0,1,0,1,0,0,1,0,1,0,0,0,1],
+    [1,0,1,0,0,0,2,0,0,2,0,0,0,1,0,1],
+    [1,0,1,1,0,1,1,0,0,1,1,0,1,1,0,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  ];
+  const COLS = MAP[0].length, ROWS = MAP.length;
+  const MW = COLS*TILE, MH = ROWS*TILE;
+
+  function insideMap(tx,ty){ return tx>=0 && ty>=0 && tx<COLS && ty<ROWS; }
+  function isWall(tx,ty){ return !insideMap(tx,ty) || MAP[ty][tx]===1; }
+  function isCloset(tx,ty){ return insideMap(tx,ty) && MAP[ty][tx]===2; }
+
+  // ---- РЕЖИМЫ ----
+  const MODES = {
+    peaceful: { name:'МИРНЫЙ',   time:100, speed:45,  chaseMult:1, viewDist:220, wallHits:0, knows:false, touch:false, canHear:false },
+    easy:    { name:'ЛЁГКИЙ',    time:90,  speed:118, chaseMult:1, viewDist:300, wallHits:4, knows:false, touch:false, canHear:true  },
+    medium:  { name:'СРЕДНИЙ',   time:90,  speed:118*2.5, chaseMult:1.2, viewDist:340, wallHits:2, knows:false, touch:false, canHear:true },
+    hard:    { name:'СЛОЖНЫЙ',   time:45,  speed:118*5,   chaseMult:1.4, viewDist:400, wallHits:1, knows:true,  touch:false, canHear:true },
+    god:     { name:'СТАРЫЙ БОГ', time:45,  speed:118*11,  chaseMult:1.6, viewDist:1000, wallHits:0, knows:true, touch:true,  canHear:true },
+  };
+  const BASE_WALL_HITS = 4;
+  const damage = {};
+  function tileKey(tx,ty){ return tx+','+ty; }
+  function tileHp(tx,ty){
+    const m = currentMode;
+    if (!m) return 0;
+    if (!insideMap(tx,ty)) return 0;
+    if (MAP[ty][tx]===1) return m.wallHits===0 ? 0 : m.wallHits;
+    if (MAP[ty][tx]===2) return m.wallHits===0 ? 0 : Math.max(1, Math.ceil(m.wallHits*0.7));
+    return 0;
+  }
+  function tileHits(tx,ty){ return damage[tileKey(tx,ty)]||0; }
+  function damageTile(tx,ty){
+    const hp = tileHp(tx,ty);
+    if (hp<=0) return false; // не может ломать (0 ударов) или пусто
+    const k = tileKey(tx,ty);
+    damage[k]=(damage[k]||0)+1;
+    if (damage[k]>=hp){ MAP[ty][tx]=0; delete damage[k]; return true; }
+    return false;
+  }
+  function resetTiles(){ for(const k in damage) delete damage[k]; }
+
+  const player = { x:TILE*2+20, y:TILE*7+20, r:12, speed:200, runMult:1.7, inCloset:null };
+  const butcher = { x:TILE*13+20, y:TILE*12+20, r:16, speed:118, chaseSpeed:150, catchDist:22, viewDist:300, heardCooldown:0, lastSeen:null, chaseTimer:0, axeTimer:0, axeTarget:null, axeTrail:0, axeDir:0 };
+  const swat = { x:TILE*2, y:TILE*11, r:10, arrived:false };
+
+  let currentMode = null;
+  let timeLeft = 90;
+  let state = 'menu'; // menu | playing | dying | dead | win
+  let keys = {};
+  let lastTime = performance.now();
+  let shutter = 0;
+  let camX=0, camY=0;
+  let godMode = false;   // игрок стал Старым Богом и гоняется за мясником
+  let godCatchT = 0;     //
+
+  // смерть от топора
+  let deathT = 0, deathPhase = 0; // 0 падение, 1 удар, 2 после
+
+  document.addEventListener('keydown', e => {
+    keys[e.code]=true;
+    if (e.code==='KeyE' && state==='playing' && !godMode) toggleCloset();
+    if (e.code==='Shift') e.preventDefault();
+    if (e.code==='KeyT' && state==='playing' && !godMode) activateGod();
+  });
+  document.addEventListener('keyup', e => { keys[e.code]=false; });
+
+  function hasLineOfSight(x1,y1,x2,y2){
+    const steps = Math.ceil(Math.hypot(x2-x1,y2-y1)/(TILE/2));
+    for(let i=1;i<=steps;i++){ const t=i/steps; const px=x1+(x2-x1)*t, py=y1+(y2-y1)*t; const tx=Math.floor(px/TILE), ty=Math.floor(py/TILE); if(isWall(tx,ty)) return false; if(isCloset(tx,ty)) return false; }
+    return true;
+  }
+
+  function toggleCloset(){
+    if(player.inCloset){ player.inCloset=null; return; }
+    const tx=Math.floor(player.x/TILE), ty=Math.floor(player.y/TILE);
+    const dirs=[[1,0],[-1,0],[0,1],[0,-1],[0,0]];
+    let best=null, bd=99;
+    for(const [dx,dy] of dirs){ const nx=tx+dx, ny=ty+dy; if(isCloset(nx,ny)){ const d=Math.hypot(player.x-(nx*TILE+TILE/2),player.y-(ny*TILE+TILE/2)); if(d<bd){bd=d;best={nx,ny};} } }
+    if(best){ player.inCloset=best; player.x=best.nx*TILE+TILE/2; player.y=best.ny*TILE+TILE/2; }
+  }
+
+  function dist(ax,ay,bx,by){ return Math.hypot(bx-ax,by-ay); }
+
+  function circleHitsWall(cx,cy,r){
+    const tx1=Math.floor((cx-r)/TILE), tx2=Math.floor((cx+r)/TILE);
+    const ty1=Math.floor((cy-r)/TILE), ty2=Math.floor((cy+r)/TILE);
+    for(let ty=ty1;ty<=ty2;ty++) for(let tx=tx1;tx<=tx2;tx++) if(isWall(tx,ty)) return true;
+    return false;
+  }
+
+  function moveButcher(dir, speed, dt, wander){
+    if(wander){ butcher.ang=butcher.ang||(Math.random()*Math.PI*2); if(Math.random()<0.02) butcher.ang=Math.random()*Math.PI*2; dir=butcher.ang; }
+    else butcher.ang=dir;
+    let nx=butcher.x+Math.cos(dir)*speed*dt;
+    let ny=butcher.y+Math.sin(dir)*speed*dt;
+    if(circleHitsWall(nx,ny,butcher.r)){
+      const tx=Math.floor((butcher.x+Math.cos(dir)*butcher.r*1.5)/TILE);
+      const ty=Math.floor((butcher.y+Math.sin(dir)*butcher.r*1.5)/TILE);
+      // Старый Бог ломает касанием
+      if(currentMode.touch && insideMap(tx,ty) && (MAP[ty][tx]===1||MAP[ty][tx]===2)){ MAP[ty][tx]=0; butcher.axeTrail=0.25; butcher.axeTarget={tx,ty}; }
+
+      if(tileHp(tx,ty)>0 && insideMap(tx,ty)){ trySwingAxe(tx,ty,dir); return; }
+      for(let i=0;i<8;i++){ butcher.ang+=Math.PI/4; nx=butcher.x+Math.cos(butcher.ang)*speed*dt; ny=butcher.y+Math.sin(butcher.ang)*speed*dt; if(!circleHitsWall(nx,ny,butcher.r)) break; }
+    }
+    if(circleHitsWall(nx,ny,butcher.r)) return;
+    butcher.x=nx; butcher.y=ny;
+  }
+
+  function trySwingAxe(tx,ty,dir){
+    if(butcher.axeTimer>0) return;
+    butcher.axeTimer=0.5; butcher.axeTarget={tx,ty}; butcher.axeDir=dir;
+    if(damageTile(tx,ty)) butcher.axeTrail=0.3;
+  }
+
+  function update(dt){
+    if(state!=='playing' && state!=='dying') return;
+
+    // анимация смерти
+    if(state==='dying'){ deathT+=dt; return; }
+
+    timeLeft -= dt;
+    if(timeLeft<=0){
+      timeLeft=0;
+      if(godMode){ godLose(); return; }
+      win(); return;
+    }
+
+    if(player.inCloset){ player.x=player.inCloset.nx*TILE+TILE/2; player.y=player.inCloset.ny*TILE+TILE/2; }
+
+    const run = keys['ShiftLeft']||keys['ShiftRight'];
+    const spd = player.speed*(run?player.runMult:1)*(godMode?1.6:1);
+    let dx=0,dy=0;
+    if(keys['KeyA']||keys['ArrowLeft'])dx-=1;
+    if(keys['KeyD']||keys['ArrowRight'])dx+=1;
+    if(keys['KeyW']||keys['ArrowUp'])dy-=1;
+    if(keys['KeyS']||keys['ArrowDown'])dy+=1;
+    if(player.inCloset){dx=0;dy=0;}
+    if(dx||dy){ const len=Math.hypot(dx,dy)||1; dx/=len; dy/=len; if(run && !godMode && currentMode.canHear) butcher.heardCooldown=Math.max(butcher.heardCooldown,0.6); const pr = godMode?player.r*1.6:player.r; let nx=player.x+dx*spd*dt, ny=player.y; if(!circleHitsWall(nx,ny,pr)) player.x=nx; nx=player.x; ny=player.y+dy*spd*dt; if(!circleHitsWall(nx,ny,pr)) player.y=ny; }
+
+    // мясник
+    const dToPlayer = dist(butcher.x,butcher.y,player.x,player.y);
+
+    if(godMode){
+      // === РЕЖИМ БОГА: игрок бог, мясник убегает ===
+      butcher.ang = Math.atan2(butcher.y-player.y, butcher.x-player.x); // от игрока
+      // мясник ломает стены на пути бегства (легко) и убегает на максималке
+      moveButcher(butcher.ang, butcher.speed*1.3, dt, false);
+      // бог ломает стены при движении (касание)
+      const tb = Math.floor(player.x/TILE), bb = Math.floor(player.y/TILE);
+      const gp = 2; // радиус сокрушения бога
+      for(let ty=bb-gp;ty<=bb+gp;ty++)for(let tx=tb-gp;tx<=tb+gp;tx++){
+        if(insideMap(tx,ty) && (MAP[ty][tx]===1||MAP[ty][tx]===2)){ MAP[ty][tx]=0; butcher.axeTrail=0.25; butcher.axeTarget={tx,ty}; }
+      }
+      // поймал мясника?
+      if(dToPlayer < (player.r*1.6 + butcher.r)){ godWin(); return; }
+      // спецназ приехал — поймали бога
+      if(timeLeft<=0){ godLose(); return; }
+      return;
+    }
+
+    const playerVisible = !player.inCloset && hasLineOfSight(butcher.x,butcher.y,player.x,player.y);
+
+    let found=false;
+    if(playerVisible && dToPlayer<butcher.viewDist) found=true;
+    if(currentMode.canHear && butcher.heardCooldown>0 && dToPlayer<220) found=true;
+    butcher.heardCooldown=Math.max(0,butcher.heardCooldown-dt);
+
+    if(butcher.axeTimer>0) butcher.axeTimer=Math.max(0,butcher.axeTimer-dt);
+    if(butcher.axeTrail>0) butcher.axeTrail=Math.max(0,butcher.axeTrail-dt);
+
+    const chaseMult = currentMode.chaseMult || 1;
+
+    // ВСЕГДА ЗНАЕТ где ты
+    if(currentMode.knows){
+      butcher.lastSeen = { x: player.x, y: player.y };
+      butcher.chaseTimer = 3;
+    } else if(playerVisible){
+      butcher.lastSeen = { x: player.x, y: player.y };
+      butcher.chaseTimer = 3;
+    }
+
+    panicEl.classList.toggle('on', (currentMode.knows || (playerVisible && dToPlayer<butcher.viewDist)));
+
+    if(butcher.axeTimer>0){
+      // удар
+    } else if(currentMode.knows){
+      // всегда знает — несётся напрямик ломая всё
+      const ang = Math.atan2(player.y-butcher.y, player.x-butcher.x);
+      moveButcher(ang, butcher.speed*chaseMult, dt, false);
+    } else if(player.inCloset){
+      const ang = Math.atan2(player.y-butcher.y, player.x-butcher.x);
+      moveButcher(ang, butcher.speed*0.8, dt, false, true);
+    } else if(butcher.chaseTimer>0 && butcher.lastSeen){
+      butcher.chaseTimer-=dt;
+      const ang = Math.atan2(butcher.lastSeen.y-butcher.y, butcher.lastSeen.x-butcher.x);
+      moveButcher(ang, butcher.speed*chaseMult, dt, false, true);
+    } else if(found){
+      const ang = Math.atan2(player.y-butcher.y, player.x-butcher.x);
+      moveButcher(ang, butcher.speed*chaseMult, dt, false, true);
+    } else {
+      // патруль: wander сам управляет butcher.ang, угол не нужен
+      moveButcher(butcher.ang, butcher.speed*0.4, dt, true);
+    }
+
+    // поимка
+    if(!player.inCloset && dToPlayer<butcher.catchDist){
+      if(currentMode.knows || playerVisible) startDeath();
+    }
+    if(!currentMode.knows && player.inCloset && dToPlayer<30){
+      startDeath();
+    }
+  }
+
+  function startDeath(){
+    state='dying';
+    deathT=0; deathPhase=0;
+  }
+
+  function die(){ state='dead'; showOverlay('dead'); }
+
+  function win(){ state='win'; swat.arrived=true; showOverlay('win'); }
+
+  function activateGod(){
+    godMode = true;
+    player.inCloset = null;
+    swat.arrived = false;
+    timeLeft = 30; // богу даём 30 секунд поймать мясника до прибытия спецназа
+    state = 'playing';
+    panicEl.classList.remove('on');
+    godMsgEl.style.opacity = 1;
+    modeTag.textContent = currentMode.name + ' — БОГ';
+  }
+  function godWin(){
+    state = 'win';
+    godMode = false;
+    showGodOverlay(true);
+  }
+  function godLose(){
+    state = 'dead';
+    godMode = false;
+    showGodOverlay(false);
+  }
+  function showGodOverlay(isWin){
+    overlay.classList.remove('hidden');
+    overlay.className = isWin?'win':'dead';
+    if(isWin){
+      overlay.innerHTML = '<h1>ТЫ ПОПАЛСЯ</h1><div class="sub">Ты — Старый Бог. Мясник в ужасе повис на твоей руке, как мешок.<br><span>Ты успел. Спецназ уехал ни с чем.</span></div><div class="overlay-actions"><button id="again" class="ghost">В МЕНЮ</button><button id="re">ЕЩЁ РАЗ</button></div><div class="foot">Боги не знают страха. Но сегодня — знали.</div>';
+    } else {
+      overlay.innerHTML = '<h1>СПЕЦНАЗ ПОЙМАЛ ТЕБЯ</h1><div class="sub">Ты был богом — но против пуль Спецназа боги бессильны.<br><span style="color:#ff6060">Ты не успел поймать Мясника вовремя.</span></div><div class="overlay-actions"><button id="again" class="ghost">В МЕНЮ</button><button id="re">ЕЩЁ РАЗ</button></div><div class="foot">Даже Боги слышат выстрелы.</div>';
+    }
+    document.getElementById('re').addEventListener('click', ()=>resetGame(true));
+    document.getElementById('again').addEventListener('click', showMenu);
+  }
+
+  function showOverlay(type){
+    overlay.classList.remove('hidden');
+    overlay.className=type;
+    const name = currentMode ? currentMode.name : '';
+    if(type==='win'){
+      overlay.innerHTML = '<h1>СПЕЦНАЗ</h1><div class="sub">Двери вышибли <span>вовремя</span>. Хлопки, крики — и Мясник повис на крюке.<br>Ты вышел живым из бойни. Режим: <span>'+name+'</span></div><div class="overlay-actions"><button id="again" class="ghost">В МЕНЮ</button><button id="re">ЕЩЁ РАЗ</button></div><div class="foot">Ту самую ночь ты не забудешь.</div>';
+    } else {
+      overlay.innerHTML = '<h1>ОН НАШЁЛ ТЕБЯ</h1><div class="sub"><span style="color:#ff6060">Продержись дольше. Спрячься лучше.</span></div><div class="overlay-actions"><button id="again" class="ghost">В МЕНЮ</button><button id="re">ПОПРОБОВАТЬ СНОВА</button></div><div class="foot">Мясник вытирает топор о фартук.</div>';
+    }
+    document.getElementById('re').addEventListener('click', ()=>resetGame(true));
+    document.getElementById('again').addEventListener('click', showMenu);
+  }
+
+  function applyMode(key){
+    const m = MODES[key];
+    currentMode = m;
+    butcher.speed = m.speed;
+    butcher.chaseSpeed = m.speed;
+    butcher.viewDist = m.viewDist;
+    timeLeft = m.time;
+    modeTag.textContent = m.name;
+    modeTag.style.display = 'block';
+  }
+
+  function resetGame(keepMode){
+    player.x=TILE*2+20; player.y=TILE*7+20; player.inCloset=null;
+    butcher.x=TILE*13+20; butcher.y=TILE*12+20; butcher.ang=Math.random()*Math.PI*2;
+    butcher.axeTimer=0; butcher.axeTarget=null; butcher.axeTrail=0;
+    butcher.lastSeen=null; butcher.chaseTimer=0; butcher.heardCooldown=0;
+    godMode=false;
+    panicEl.classList.remove('on');
+    godMsgEl.style.opacity = 0;
+    if(!keepMode && currentMode) applyMode(difficultyKey); else if(currentMode) applyMode(difficultyKey);
+    swat.arrived=false;
+    resetTiles();
+    deathT=0;
+    state='playing'; shutter=0;
+    overlay.classList.add('hidden');
+  }
+
+  let difficultyKey = 'easy';
+  function showMenu(){
+    state='menu';
+    modeTag.style.display='none';
+    overlay.classList.remove('hidden');
+    overlay.className='';
+    overlay.innerHTML =
+      '<h1>МЯСНИК</h1>'+
+      '<div class="sub">Ты спрятался в заброшенной бойне. Продержись до приезда спецназа. Выбери режим.</div>'+
+      '<div class="diff-title">— ВЫБЕРИ СЛОЖНОСТЬ —</div>'+
+      '<div class="diff-panel">'+
+        '<button class="diff-btn" data-d="peaceful"><span class="d-label">МИРНЫЙ</span><span class="d-desc">Не ломает стены, не знает где ты. Неторопливый.</span><span class="d-time">100с</span></button>'+
+        '<button class="diff-btn" data-d="easy"><span class="d-label">ЛЁГКИЙ</span><span class="d-desc">Ломает стены и шкафы за 4 удара. Бежит, когда видит тебя.</span><span class="d-time">90с</span></button>'+
+        '<button class="diff-btn" data-d="medium"><span class="d-label">СРЕДНИЙ</span><span class="d-desc">В 2.5 раза быстрее. Ломает за 2 удара.</span><span class="d-time">90с</span></button>'+
+        '<button class="diff-btn" data-d="hard"><span class="d-label">СЛОЖНЫЙ</span><span class="d-desc">В 5 раз быстрее. Ломает за 1 удар. Всегда знает где ты.</span><span class="d-time">45с</span></button>'+
+        '<button class="diff-btn" data-d="god"><span class="d-label">СТАРЫЙ БОГ</span><span class="d-desc">В 11 раз быстрее. Знает всё. Ломает при касании.</span><span class="d-time">45с</span></button>'+
+      '</div>'+
+      '<div class="keys"><b>W A S D</b> — движение · <b>Shift</b> — бег · <b>E</b> — в шкаф / из шкафа</div>'+
+      '<div class="foot">Спецназ приедет. Вопрос лишь — доживёшь ли ты.</div>';
+    overlay.querySelectorAll('.diff-btn').forEach(b => b.addEventListener('click', ()=>{
+      difficultyKey = b.dataset.d;
+      applyMode(difficultyKey);
+      resetGame(true);
+    }));
+  }
+
+  // ---- Отрисовка ----
+  function draw(){
+    ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
+    camX = player.x-W/2; camY = player.y-H/2;
+    ctx.save(); ctx.translate(-camX,-camY);
+
+    ctx.fillStyle='#11130f'; ctx.fillRect(0,0,MW,MH);
+    for(let i=0;i<26;i++){ const bx=(i*97)%MW, by=(i*53)%MH; ctx.fillStyle='rgba(90,5,5,'+(0.15+((i%5)*0.03))+')'; ctx.beginPath(); ctx.arc(bx,by,18+(i%4)*8,0,Math.PI*2); ctx.fill(); }
+
+    for(let ty=0;ty<ROWS;ty++)for(let tx=0;tx<COLS;tx++){
+      if(MAP[ty][tx]===1){
+        ctx.fillStyle='#3a3a40'; ctx.fillRect(tx*TILE,ty*TILE,TILE,TILE);
+        ctx.strokeStyle='#1b1b1e'; ctx.lineWidth=1; ctx.strokeRect(tx*TILE,ty*TILE,TILE,TILE);
+        ctx.fillStyle='rgba(0,0,0,0.3)'; ctx.fillRect(tx*TILE+8,ty*TILE+15,12,3); ctx.fillRect(tx*TILE+4,ty*TILE+30,8,3);
+        const th=tileHits(tx,ty); if(th>0){
+          ctx.strokeStyle='#000'; ctx.lineWidth=1.5; ctx.beginPath();
+          ctx.moveTo(tx*TILE+6,ty*TILE+8);ctx.lineTo(tx*TILE+18,ty*TILE+26);ctx.lineTo(tx*TILE+12,ty*TILE+34);
+          ctx.moveTo(tx*TILE+26,ty*TILE+10);ctx.lineTo(tx*TILE+14,ty*TILE+30);ctx.moveTo(tx*TILE+32,ty*TILE+22);ctx.lineTo(tx*TILE+24,ty*TILE+36);
+          ctx.stroke();
+        }
+      } else if(MAP[ty][tx]===2){
+        ctx.fillStyle='#3d3a30'; ctx.fillRect(tx*TILE+3,ty*TILE+3,TILE-6,TILE-6);
+        ctx.strokeStyle='#1f1d17'; ctx.lineWidth=2; ctx.strokeRect(tx*TILE+3,ty*TILE+3,TILE-6,TILE-6);
+        ctx.fillStyle='#2a2820'; ctx.fillRect(tx*TILE+TILE/2-2,ty*TILE+3,4,TILE-6);
+        ctx.fillStyle='#4a463a'; ctx.beginPath(); ctx.arc(tx*TILE+TILE/2,ty*TILE+TILE/2,2.5,0,Math.PI*2); ctx.fill();
+        const ch=tileHits(tx,ty); if(ch>0){
+          ctx.strokeStyle='rgba(0,0,0,0.7)'; ctx.lineWidth=1.5; ctx.beginPath();
+          ctx.moveTo(tx*TILE+10,ty*TILE+10);ctx.lineTo(tx*TILE+24,ty*TILE+24);ctx.moveTo(tx*TILE+24,ty*TILE+8);ctx.lineTo(tx*TILE+12,ty*TILE+30);
+          ctx.stroke();
+        }
+      }
+    }
+
+    if(swat.arrived) drawSoldier(swat.x, swat.y);
+    drawPlayer();
+    drawButcher();
+    ctx.restore();
+
+    const dark = player.inCloset ? 0.55 : 0.35;
+    const grad = ctx.createRadialGradient(player.x-camX, player.y-camY, 40, player.x-camX, player.y-camY, 320);
+    grad.addColorStop(0,'rgba(0,0,0,0)'); grad.addColorStop(1,'rgba(0,0,0,'+dark+')');
+    ctx.fillStyle=grad; ctx.fillRect(0,0,W,H);
+
+    if(panicEl.classList.contains('on')){
+      const p=(Math.sin(performance.now()/120)+1)/2;
+      ctx.fillStyle='rgba(120,0,0,'+(0.08+p*0.10)+')'; ctx.fillRect(0,0,W,H);
+    }
+    if(shutter>0){ ctx.fillStyle='rgba(0,0,0,'+Math.min(1,shutter)+')'; ctx.fillRect(0,0,W,H); }
+  }
+
+  function drawPlayer(){
+    if(player.inCloset && state!=='dying' && state!=='dead') return;
+    let px=player.x, py=player.y, pr=player.r;
+    let col='#d9d9d9', inner='#fff';
+    if(godMode){
+      // Огромный Старый Бог
+      pr = player.r*1.6;
+      col='#8b0000'; inner='#ff2a00';
+      ctx.save();
+      ctx.shadowColor='#ff2a00'; ctx.shadowBlur=30;
+      ctx.fillStyle=col; ctx.beginPath(); ctx.arc(px,py,pr,0,Math.PI*2); ctx.fill();
+      ctx.shadowBlur=0;
+      ctx.fillStyle=inner; ctx.beginPath(); ctx.arc(px,py,pr*0.6,0,Math.PI*2); ctx.fill();
+      // глаза бога
+      ctx.fillStyle='#fff'; 
+      ctx.beginPath(); ctx.arc(px-6,py-4,3,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(px+6,py-4,3,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#000';
+      ctx.beginPath(); ctx.arc(px-6,py-4,1.5,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(px+6,py-4,1.5,0,Math.PI*2); ctx.fill();
+      ctx.restore();
+      return;
+    }
+    if(state==='dying'){
+      const fall = Math.min(1, deathT/0.4);
+      py += fall*8;
+      col = `rgb(${Math.round(120+135*fall)},${Math.round(30+60*fall)},${Math.round(30+60*fall)})`;
+      inner = `rgb(${Math.round(80+60*fall)},${Math.round(10+10*fall)},${Math.round(10+10*fall)})`;
+      if(player.inCloset) player.inCloset=null;
+    }
+    ctx.fillStyle=col; ctx.beginPath(); ctx.arc(px,py,pr,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle=inner; ctx.beginPath(); ctx.arc(px,py,pr*0.5,0,Math.PI*2); ctx.fill();
+  }
+
+  function drawBloodSplash(x,y,scale){
+    // брызги крови от удара топора
+    const n=12;
+    ctx.save();
+    ctx.globalAlpha=0.9;
+    for(let i=0;i<n;i++){
+      const ang=i*Math.PI*2/n + (Math.sin(performance.now()/30+i)*0.3);
+      const r1=5+((i*7)%6), r2=r1*scale;
+      ctx.strokeStyle='rgba(140,5,5,0.9)'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.moveTo(x+Math.cos(ang)*r1,y+Math.sin(ang)*r1); ctx.lineTo(x+Math.cos(ang)*r2,y+Math.sin(ang)*r2); ctx.stroke();
+      ctx.fillStyle='rgba(160,10,10,0.8)';
+      ctx.beginPath(); ctx.arc(x+Math.cos(ang)*r2*0.7,y+Math.sin(ang)*r2*0.7,1.6,0,Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawButcher(){
+    const b=butcher;
+    ctx.save();
+    // в режиме бога мясник трясётся от страха
+    if(godMode){
+      const shake = Math.sin(performance.now()/40)*2;
+      ctx.translate(shake,0);
+    }
+    ctx.shadowColor='#800000'; ctx.shadowBlur=26;
+    ctx.fillStyle='#5a1414'; ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,Math.PI*2); ctx.fill();
+    ctx.shadowBlur=0;
+    ctx.fillStyle='#3d0e0e'; ctx.fillRect(b.x-6,b.y-2,12,14);
+    ctx.fillStyle='#ffe600';
+    ctx.beginPath(); ctx.arc(b.x-4,b.y-5,2.5,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(b.x+4,b.y-5,2.5,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#000';
+    ctx.beginPath(); ctx.arc(b.x-3,b.y-5,1.2,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(b.x+5,b.y-5,1.2,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='#c8c8c8'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.moveTo(b.x+10,b.y-14); ctx.lineTo(b.x+16,b.y-2); ctx.arc(b.x+16,b.y-2,4,0,Math.PI,false); ctx.stroke();
+
+    // топор при замахе
+    if(butcher.axeTimer>0 && butcher.axeDir){
+      ctx.save(); ctx.translate(b.x,b.y); ctx.rotate(butcher.axeDir);
+      const swing=1-(butcher.axeTimer/0.5); ctx.rotate(-swing*1.2);
+      ctx.fillStyle='#9a8f7a'; ctx.fillRect(8,-1.5,14,3);
+      ctx.fillStyle='#c0c0c0'; ctx.beginPath(); ctx.moveTo(20,-2);ctx.lineTo(27,-7);ctx.lineTo(26,7);ctx.lineTo(20,2); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore();
+
+    // вспышка разрушения
+    if(butcher.axeTrail>0 && butcher.axeTarget){
+      const cx=butcher.axeTarget.tx*TILE+TILE/2, cy=butcher.axeTarget.ty*TILE+TILE/2;
+      const a=butcher.axeTrail/0.3;
+      ctx.save();
+      ctx.fillStyle='rgba(200,180,140,'+(a*0.7)+')'; ctx.beginPath(); ctx.arc(cx,cy,(1-a)*22+4,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle='rgba(255,240,200,'+a+')'; ctx.lineWidth=2;
+      for(let i=0;i<8;i++){ const ang=i*Math.PI/4; const r1=10, r2=(1-a)*26+6; ctx.beginPath(); ctx.moveTo(cx+Math.cos(ang)*r1,cy+Math.sin(ang)*r1); ctx.lineTo(cx+Math.cos(ang)*r2,cy+Math.sin(ang)*r2); ctx.stroke(); }
+      ctx.restore();
+    }
+
+    // при смерти: удар топором и брызги
+    if(state==='dying'){
+      const prog = Math.min(1, deathT/0.9);
+      let ang;
+      if(deathT<0.45){ ang=Math.atan2(player.y-butcher.y,player.x-butcher.x); }
+      else { ang = butcher.axeDir || Math.atan2(player.y-butcher.y,player.x-butcher.x); }
+      // топор падает на игрока
+      const ax = butcher.x + Math.cos(ang)*(butcher.r+6);
+      const ay = butcher.y + Math.sin(ang)*(butcher.r+6);
+      const strike = Math.max(0, Math.min(1, (deathT-0.4)/0.3)); // 0..1 удар
+      ctx.save(); ctx.translate(ax,ay); ctx.rotate(ang);
+      const bladeX = 8 + strike*26;
+      ctx.strokeStyle='#9a8f7a'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(0,-2); ctx.lineTo(bladeX,-2); ctx.stroke();
+      ctx.fillStyle='#c0c0c0'; ctx.beginPath(); ctx.moveTo(bladeX,-2); ctx.lineTo(bladeX+7,-7); ctx.lineTo(bladeX+6,7); ctx.lineTo(bladeX,2); ctx.closePath(); ctx.fill();
+      ctx.restore();
+      if(deathT>0.55) drawBloodSplash(player.x, player.y, 1+strike);
+    }
+  }
+
+  function drawSoldier(x,y){
+    ctx.fillStyle='#2c3a2c'; ctx.beginPath(); ctx.arc(x,y,10,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#3f4a3f'; ctx.fillRect(x-4,y-12,8,5);
+    ctx.fillStyle='#444'; ctx.fillRect(x-1,y-4,2,8);
+  }
+
+  function updateHUD(){
+    const m=Math.floor(timeLeft/60), s=Math.floor(timeLeft%60);
+    timerEl.textContent=m+':'+(s<10?'0':'')+s;
+    timerEl.classList.toggle('danger',timeLeft<20);
+  }
+
+  function loop(now){
+    const dt=Math.min(0.05,(now-lastTime)/1000);
+    lastTime=now;
+    // переход к экрану смерти
+    if(state==='dying' && deathT>=0.9){ die(); }
+    update(dt); draw(); updateHUD();
+    requestAnimationFrame(loop);
+  }
+
+  butcher.ang=Math.random()*Math.PI*2;
+  showMenu();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
