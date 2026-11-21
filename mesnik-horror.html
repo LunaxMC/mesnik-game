@@ -196,12 +196,22 @@
   };
 
   // ---- СПАВН в комнате (пустой пол, не дверь, не стена) ----
+  // СПАВН в открытом месте: минимум 2 проходимых соседа (иначе существо зажато и не может двигаться)
   function findSpawnChar(ch){
+    // точные точки P/B, если подходят
     for(let y=1;y<ROWS-1;y++) for(let x=1;x<COLS-1;x++)
-      if(MAP[y][x]===ch) return { tx:x, ty:y };
-    // запасной: любая пустая клетка
+      if(MAP[y][x]===ch){
+        let open=0;
+        for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]) if(!isBlocking(x+dx,y+dy)) open++;
+        if(open>=2) return { tx:x, ty:y };
+      }
+    // запасной: любая открытая клетка с >=2 соседями
     for(let y=1;y<ROWS-1;y++) for(let x=1;x<COLS-1;x++)
-      if(MAP[y][x]==='.') return { tx:x, ty:y };
+      if(MAP[y][x]==='.'){
+        let open=0;
+        for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]) if(!isBlocking(x+dx,y+dy)) open++;
+        if(open>=2) return { tx:x, ty:y };
+      }
     return { tx:2, ty:2 };
   }
   const ps = findSpawnChar('P');
@@ -222,7 +232,7 @@
   };
   const butcher = {
     x: bs.tx + 0.5, y: bs.ty + 0.5,
-    r: 0.5, speed: 0.7, catchDist: 0.7, viewDist: 0.9,
+    r: 0.25, speed: 0.7, catchDist: 0.6, viewDist: 0.9,
     heardCooldown:0, lastSeen:null, chaseTimer:0,
     axeTimer:0, axeTarget:null, axeTrail:0, axeDir:0
   };
@@ -237,6 +247,12 @@
   let deathT = 0, deathPhase = 0;
   let serumTimer = 0;
   let clubCooldown = 0;
+  // скример
+  let nextScare = 8;     // через сколько секунд возможен скример (случайно)
+  let scareActive = 0;   // длительность скримера на экране
+  // скример
+  let scaryTimer = 0;      // время до следующего возможного скримера
+  let scaryActive = 0;     // длительность вспышки скримера
 
   // ---- УПРАВЛЕНИЕ ----
   document.addEventListener('keydown', e => {
@@ -527,9 +543,52 @@
     if(serumTimer>0) serumTimer-=dt;
     if(flashTimer>0){ flashTimer-=dt; if(flashTimer<=0) flashMsgEl.style.opacity='0'; }
     updateInvHUD();
+
+    // скример: случайный выброс в случайный момент
+    if(scareActive>0) scareActive-=dt;
+    if(nextScare>0) nextScare-=dt;
+    if(nextScare<=0 && scareActive<=0 && state==='playing'){
+      // не пугает прямо в момент смерти/победы
+      startScare();
+      nextScare = 10 + Math.random()*20; // от 10 до 30 сек до следующего
+    }
   }
 
+  // оглушение булавой мясника (глобальный флаг для anti-death)
   let clubStun=false;
+
+  function startScare(){
+    scareActive = 0.9; // вспышка ~0.9 сек
+    playScareSound();
+  }
+
+  function playScareSound(){
+    try{
+      // Резкий звук скримера (WebAudio, без внешних файлов): диссонансные высокие + шумовой удар
+      const AC = window.AudioContext||window.webkitAudioContext;
+      if(!AC) return;
+      if(!window.__ac) window.__ac = new AC();
+      const ac = window.__ac;
+      if(ac.state==='suspended') ac.resume();
+      const t0 = ac.currentTime;
+      // громкий шумовой удар
+      const dur = 0.5;
+      const buf = ac.createBuffer(1, Math.floor(ac.sampleRate*dur), ac.sampleRate);
+      const data = buf.getChannelData(0);
+      for(let i=0;i<data.length;i++){ data[i] = (Math.random()*2-1) * Math.exp(-3*i/data.length); }
+      const src = ac.createBufferSource(); src.buffer=buf;
+      const g = ac.createGain(); g.gain.value = 0.5;
+      src.connect(g); g.connect(ac.destination); src.start(t0);
+      // пронзительный диссонанс (две близкие частоты)
+      const o1=ac.createOscillator(), o2=ac.createOscillator();
+      o1.type='sawtooth'; o2.type='square';
+      o1.frequency.value=880; o2.frequency.value=920;
+      const og=ac.createGain(); og.gain.setValueAtTime(0.4,t0); og.gain.exponentialRampToValueAtTime(0.001,t0+0.6);
+      o1.connect(og); o2.connect(og); og.connect(ac.destination);
+      o1.start(t0); o2.start(t0); o1.stop(t0+0.6); o2.stop(t0+0.6);
+    }catch(e){}
+  }
+
   function updateInvHUD(){
     let s='';
     s += (player.batts>0 ? ('🔦'+player.batts) : '—');
@@ -632,6 +691,8 @@
     player.batts=0; player.club=false; player.serum=false; player.serumUsed=false;
     serumTimer=0; clubCooldown=0;
     flashMsgEl.style.opacity='0'; flashTimer=0;
+    // сброс скримера
+    scareActive=0; nextScare=6+Math.random()*8;
     if(currentMode) applyMode(difficultyKey);
     deathT=0; state='playing'; shutter=0;
     overlay.classList.add('hidden');
@@ -833,6 +894,40 @@ if(hitVal==='#'||hitVal==='C'||hitVal==='D') break;
       const g=(Math.sin(performance.now()/250)+1)*0.06;
       ctx.fillStyle='rgba(255,40,0,'+g+')'; ctx.fillRect(0,0,W,H);
     }
+    // СКРИМЕР: жуткое лицо во весь экран на доли секунды
+    if(scareActive>0){
+      const k = Math.max(0, Math.min(1, scareActive/0.9)); // 1 в начале, 0 в конце
+      ctx.save();
+      ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
+      // лицо
+      const cx=W/2, cy=H/2;
+      const R = H*0.9*k + H*0.2;
+      ctx.fillStyle='#c9c9d4';
+      ctx.beginPath(); ctx.ellipse(cx, cy, R*1.05, R, 0, 0, Math.PI*2); ctx.fill();
+      // глазницы
+      ctx.fillStyle='#0a0a0a';
+      ctx.beginPath(); ctx.ellipse(cx-R*0.4, cy-R*0.15, R*0.28, R*0.42, 0, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(cx+R*0.4, cy-R*0.15, R*0.28, R*0.42, 0, 0, Math.PI*2); ctx.fill();
+      // белки-глаза
+      const ew = Math.sin(performance.now()/30)*R*0.05;
+      ctx.fillStyle='#fff';
+      ctx.beginPath(); ctx.arc(cx-R*0.4+ew, cy-R*0.1, R*0.14, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx+R*0.4+ew, cy-R*0.1, R*0.14, 0, Math.PI*2); ctx.fill();
+      // зрачки
+      ctx.fillStyle='#000';
+      ctx.beginPath(); ctx.arc(cx-R*0.4, cy-R*0.06, R*0.05, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx+R*0.4, cy-R*0.06, R*0.05, 0, Math.PI*2); ctx.fill();
+      // открытый рот
+      ctx.fillStyle='#2a0505';
+      ctx.beginPath(); ctx.ellipse(cx, cy+R*0.45, R*0.5, R*(0.2+0.25*(1-k)), 0, 0, Math.PI*2); ctx.fill();
+      // зубы
+      ctx.fillStyle='#fff';
+      ctx.fillRect(cx-R*0.4, cy+R*0.28, R*0.12, R*0.12);
+      ctx.fillRect(cx-R*0.15, cy+R*0.28, R*0.12, R*0.12);
+      ctx.fillRect(cx+R*0.1, cy+R*0.28, R*0.12, R*0.12);
+      ctx.fillRect(cx+R*0.32, cy+R*0.28, R*0.12, R*0.12);
+      ctx.restore();
+    }
     if(shutter>0){ ctx.fillStyle='rgba(0,0,0,'+Math.min(1,shutter)+')'; ctx.fillRect(0,0,W,H); }
   }
 
@@ -851,6 +946,10 @@ if(hitVal==='#'||hitVal==='C'||hitVal==='D') break;
     updateHUD();
     requestAnimationFrame(loop);
   }
+
+  // Резервный тик: если rAF приостановлен (скрытая вкладка/фокус не на окне),
+  // игра не стоит на месте — мясник и таймер продолжают идти.
+  setInterval(()=>{ if(state==='playing'){ update(0.033); } }, 33);
 
   let shotDark=false;
   showMenu();
