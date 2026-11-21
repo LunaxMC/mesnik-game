@@ -235,7 +235,7 @@
   };
   const butcher = {
     x: bs.tx + 0.5, y: bs.ty + 0.5,
-    r: 0.25, speed: 0.7, catchDist: 0.6, viewDist: 0.9,
+    r: 0.22, speed: 0.7, catchDist: 0.6, viewDist: 0.9,
     heardCooldown:0, lastSeen:null, chaseTimer:0,
     axeTimer:0, axeTarget:null, axeTrail:0, axeDir:0
   };
@@ -250,6 +250,9 @@
   let deathT = 0, deathPhase = 0;
   let serumTimer = 0;
   let clubCooldown = 0;
+  // призраки — проходят сквозь стены, только пугают (не убивают)
+  let ghosts = [];
+  let ghostTimer = 20; // до появления первого призрака
   // скример
   let nextScare = 15;     // через сколько секунд возможен первый скример
   let scareActive = 0;   // длительность скримера на экране
@@ -423,6 +426,11 @@
     if(best){
       player.inCloset=best;
       player.x=best.tx+0.5; player.y=best.ty+0.5;
+      // СКЕЛЕТ В ШКАФУ: с шансом выскакивает череп и пугает
+      if(Math.random()<0.45){
+        scareActive=0.9; scareVariant=4; // вариант 4 = скелет/череп
+        playScareSound(4, 1);
+      }
     }
   }
 
@@ -446,7 +454,10 @@
       if(currentMode.touch && insideMap(tx,ty) && (MAP[ty][tx]==='#'||MAP[ty][tx]==='C'||MAP[ty][tx]==='D')){ MAP[ty][tx]='.'; butcher.axeTrail=0.25; butcher.axeTarget={tx,ty}; }
       if(insideMap(tx,ty) && isDoor(tx,ty)){ MAP[ty][tx]='.'; return; }
       if(tileHp(tx,ty)>0 && insideMap(tx,ty)){ trySwingAxe(tx,ty,dir); return; }
-      for(let i=0;i<8;i++){ butcher.ang+=Math.PI/4; nx=butcher.x+Math.cos(butcher.ang)*speed*dt; ny=butcher.y+Math.sin(butcher.ang)*speed*dt; if(!circleHitsWall(nx,ny,butcher.r)) break; }
+      // поиск свободного направления (8 попыток), иначе разворот
+      let moved=false;
+      for(let i=0;i<8;i++){ butcher.ang+=Math.PI/4; nx=butcher.x+Math.cos(butcher.ang)*speed*dt; ny=butcher.y+Math.sin(butcher.ang)*speed*dt; if(!circleHitsWall(nx,ny,butcher.r)){ moved=true; break; } }
+      if(!moved){ butcher.ang+=Math.PI; nx=butcher.x+Math.cos(butcher.ang)*speed*dt; ny=butcher.y+Math.sin(butcher.ang)*speed*dt; }
     }
     if(circleHitsWall(nx,ny,butcher.r)) return;
     butcher.x=nx; butcher.y=ny;
@@ -557,6 +568,39 @@
       startScare();
       nextScare = pickScareInterval();
     }
+
+    // === ПРИЗРАКИ ===
+    ghostTimer-=dt;
+    if(ghostTimer<=0){
+      spawnGhost();
+      ghostTimer = 18 + Math.random()*12; // новый призрак каждые 18-30 сек
+    }
+    // двигаем призраков: они проходят сквозь стены к игроку
+    for(let i=ghosts.length-1;i>=0;i--){
+      const g=ghosts[i];
+      g.life-=dt;
+      if(g.life<=0){ ghosts.splice(i,1); continue; }
+      // движение сквозь стены прямо к игроку
+      if(!player.inCloset){
+        const ang=Math.atan2(player.y-g.y, player.x-g.x);
+        g.x+=Math.cos(ang)*g.speed*dt;
+        g.y+=Math.sin(ang)*g.speed*dt;
+      }
+    }
+  }
+
+  // спавн призрака на некотором расстоянии от игрока (может быть в стене)
+  function spawnGhost(){
+    const ang = Math.random()*Math.PI*2;
+    const d = 5 + Math.random()*6;
+    ghosts.push({
+      x: player.x + Math.cos(ang)*d,
+      y: player.y + Math.sin(ang)*d,
+      speed: 1.2 + Math.random()*0.8,
+      life: 6 + Math.random()*4,   // живёт 6-10 сек
+      r: 0.3,
+      seed: Math.random()*100
+    });
   }
 
   // случайный интервал до следующего скримера: 15, 30 или 50 секунд
@@ -759,6 +803,7 @@
     butcher.x=bs.tx+0.5; butcher.y=bs.ty+0.5; butcher.ang=Math.random()*Math.PI*2;
     butcher.axeTimer=0; butcher.axeTarget=null; butcher.axeTrail=0;
     butcher.lastSeen=null; butcher.chaseTimer=0; butcher.heardCooldown=0;
+    ghosts=[]; ghostTimer=18+Math.random()*8;
     godMode=false; panicEl.classList.remove('on'); godMsgEl.style.opacity=0;
     // сброс лута/предметов
     player.batts=0; player.club=false; player.serum=false; player.serumUsed=false;
@@ -863,16 +908,33 @@
     g.fillStyle='rgba(0,0,0,0.3)'; g.fillRect(30,0,4,h); // щель между створками
   });
 
-  // Сундук — золотистый металл/дерево
+  // Сундук — золотой с голубыми самоцветами
   makeTex('chest', 64,64,(g,w,h)=>{
-    g.fillStyle='#7a5a24'; g.fillRect(0,0,w,h);
-    g.strokeStyle='#5a4018'; g.lineWidth=2;
+    g.fillStyle='#ffd24a'; g.fillRect(0,0,w,h);
+    // золотой блеск градиентными полосами
+    const grad = g.createLinearGradient(0,0,w,h);
+    grad.addColorStop(0,'#ffe98a');
+    grad.addColorStop(0.4,'#f5c13a');
+    grad.addColorStop(1,'#c9972a');
+    g.fillStyle=grad; g.fillRect(0,0,w,h);
+    // заклёпки по углам
+    g.fillStyle='#e6a82d'; 
+    for(let i=0;i<4;i++){ const px= i<2?3:w-5, py=(i%2)?h-5:3; g.beginPath(); g.arc(px,py,3,0,Math.PI*2); g.fill(); }
+    // голубая окантовка
+    g.strokeStyle='#3aa0c9'; g.lineWidth=3;
     g.strokeRect(2,2,w-4,h-4);
     g.strokeRect(6,6,w-12,h-12);
-    g.fillStyle='#c9a84a'; // замок
-    g.fillRect(w/2-5, h/2-5, 10,10);
-    g.fillStyle='#5a4018'; g.fillRect(w/2-2, h/2-2, 4,4);
-    g.fillStyle='rgba(255,230,150,0.15)'; g.fillRect(4,4,8,8);
+    // замок — золотой с голубым самоцветом
+    g.fillStyle='#ffe98a'; g.fillRect(w/2-6, h/2-6, 12,12);
+    g.beginPath(); g.arc(w/2, h/2, 3.5, 0, Math.PI*2); g.fillStyle='#3aa0c9'; g.fill();
+    // голубые камни на крышке
+    g.fillStyle='#4fc3e8';
+    g.beginPath(); g.arc(14,8,2.5,0,Math.PI*2); g.fill();
+    g.beginPath(); g.arc(w-14,8,2.5,0,Math.PI*2); g.fill();
+    g.beginPath(); g.arc(14,h-8,2.5,0,Math.PI*2); g.fill();
+    g.beginPath(); g.arc(w-14,h-8,2.5,0,Math.PI*2); g.fill();
+    // блик
+    g.fillStyle='rgba(255,255,230,0.35)'; g.fillRect(4,4,10,8);
   });
 
   // Пол — бетонные плиты
@@ -1112,6 +1174,48 @@ if(hitVal==='#'||hitVal==='C'||hitVal==='D') break;
     ctx.fillStyle='rgba(0,0,0,0.5)';
     ctx.beginPath(); ctx.ellipse(cx, bodyY+rad*1.15, rad*0.8, rad*0.2, 0, 0, Math.PI*2); ctx.fill();
     ctx.restore();
+
+    // === ПРИЗРАКИ (полупрозрачные, проходят сквозь стены) ===
+    for(const g of ghosts){
+      if(g.life<=0) continue;
+      const gspx = g.x - player.x;
+      const gspy = g.y - player.y;
+      const ginv = 1/(player.planeX*player.dirY - player.dirX*player.planeY);
+      const gtx = ginv*(player.dirY*gspx - player.dirX*gspy);
+      const gty = ginv*(-player.planeY*gspx + player.planeX*gspy);
+      if(gty<=0.05) continue;
+      const gsx = Math.floor((W/2)*(1+gtx/gty));
+      const gh = Math.abs(Math.floor(H/gty));
+      const gwdt = Math.abs(Math.floor(H/gty)*0.4);
+      const gy0 = Math.max(0, Math.floor(-gh/2+H/2));
+      const gxb = zbuffer[Math.min(W-1, Math.max(0,gsx))]||0;
+      if(gty > gxb) continue; // за стеной не прячем — призрак наоборот проходит, но не перекрываем близкие стены
+      const t=performance.now()/1000;
+      const wob = Math.sin(t*3 + g.seed)*gh*0.03; // полупрозрачное колыхание
+      const fade = Math.min(1, (g.life<1? g.life : 1)) * 0.75;
+      const grad=ctx.createRadialGradient(gsx, gy0+gh*0.45, gh*0.05, gsx, gy0+gh*0.45, gh*0.6);
+      grad.addColorStop(0, 'rgba(180,200,255,'+fade+')');
+      grad.addColorStop(0.6, 'rgba(140,160,235,'+(fade*0.7)+')');
+      grad.addColorStop(1, 'rgba(100,120,200,0)');
+      ctx.fillStyle=grad;
+      // полупрозрачный силуэт-облако с развевающимся низом
+      ctx.beginPath();
+      ctx.moveTo(gsx-gwdt*0.5, gy0+gh*0.1);
+      ctx.quadraticCurveTo(gsx-gwdt*0.4, gy0+gh*0.9, gsx-gwdt*0.7, gy0+gh*1.15+wob);
+      ctx.lineTo(gsx-gwdt*0.2, gy0+gh*0.95+wob*0.5);
+      ctx.lineTo(gsx, gy0+gh*1.1+wob);
+      ctx.lineTo(gsx+gwdt*0.2, gy0+gh*0.95+wob*0.5);
+      ctx.lineTo(gsx+gwdt*0.7, gy0+gh*1.15+wob);
+      ctx.quadraticCurveTo(gsx+gwdt*0.4, gy0+gh*0.9, gsx+gwdt*0.5, gy0+gh*0.1);
+      ctx.closePath(); ctx.fill();
+      // горящие глаза-точки
+      const ye = gy0+gh*0.3;
+      const ey = fade;
+      ctx.fillStyle='rgba(190,240,255,'+Math.min(1,ey+0.3)+')';
+      ctx.beginPath(); ctx.arc(gsx-gwdt*0.15, ye, Math.max(1,gh*0.012), 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(gsx+gwdt*0.15, ye, Math.max(1,gh*0.012), 0, Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
   }
 
   function drawBloodSplash(x,y,scale){}
@@ -1166,7 +1270,29 @@ if(hitVal==='#'||hitVal==='C'||hitVal==='D') break;
       ctx.fillStyle='#000';
       ctx.beginPath(); ctx.arc(cx-R*0.4, cy-R*0.06, R*0.05, 0, Math.PI*2); ctx.fill();
       ctx.beginPath(); ctx.arc(cx+R*0.4, cy-R*0.06, R*0.05, 0, Math.PI*2); ctx.fill();
-      // открытый рот — разный для каждого варианта
+      // открытый рот — разный для каждого варианта;
+      // scareVariant 4 — скелет из шкафа (череп)
+      if(scareVariant===4){
+        // СКЕЛЕТ: белый череп с тёмными глазницами, без кожи
+        ctx.fillStyle='#e8e4d8';
+        ctx.beginPath(); ctx.ellipse(cx, cy, R*0.95, R*1.0, 0, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle='#0a0a0a';
+        ctx.beginPath(); ctx.ellipse(cx-R*0.42, cy-R*0.15, R*0.3, R*0.4, 0, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(cx+R*0.42, cy-R*0.15, R*0.3, R*0.4, 0, 0, Math.PI*2); ctx.fill();
+        // нос
+        ctx.beginPath(); ctx.moveTo(cx-R*0.07, cy+R*0.02); ctx.lineTo(cx+R*0.07, cy+R*0.02); ctx.lineTo(cx, cy+R*0.22); ctx.closePath(); ctx.fill();
+        // челюсть и зубы
+        ctx.fillStyle='#0a0a0a';
+        ctx.beginPath(); ctx.ellipse(cx, cy+R*0.55, R*0.55, R*0.34, 0, 0, Math.PI); ctx.fill();
+        ctx.fillStyle='#e8e4d8';
+        for(let i=0;i<6;i++){ ctx.fillRect(cx-R*0.5+i*(R*0.17), cy+R*0.3, R*0.13, R*0.16); }
+        // трещина на черепе
+        ctx.strokeStyle='#b0a88a'; ctx.lineWidth=Math.max(1,R*0.02);
+        ctx.beginPath(); ctx.moveTo(cx, cy-R*0.9); ctx.lineTo(cx+R*0.15, cy-R*0.4); ctx.lineTo(cx-R*0.1, cy-R*0.1); ctx.stroke();
+        ctx.restore();
+        if(shutter>0){ ctx.fillStyle='rgba(0,0,0,'+Math.min(1,shutter)+')'; ctx.fillRect(0,0,W,H); }
+        return;
+      }
       const sv = scareVariant % 4;
       if(sv===0){
         ctx.fillStyle='#2a0505';
