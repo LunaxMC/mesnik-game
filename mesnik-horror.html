@@ -190,11 +190,11 @@
 
   // ---- РЕЖИМЫ ----
   const MODES = {
-    peaceful: { name:'МИРНЫЙ',   time:100, speed:45,  chaseMult:1, viewDist:0.90, wallHits:0, knows:false, touch:false, canHear:false },
-    easy:    { name:'ЛЁГКИЙ',    time:90,  speed:0.7, chaseMult:1, viewDist:1,    wallHits:4, knows:false, touch:false, canHear:true  },
-    medium:  { name:'СРЕДНИЙ',   time:90,  speed:1.0, chaseMult:1.15, viewDist:1.15, wallHits:2, knows:false, touch:false, canHear:true },
-    hard:    { name:'СЛОЖНЫЙ',   time:45,  speed:1.5, chaseMult:1.3, viewDist:1.3,  wallHits:1, knows:true,  touch:false, canHear:true },
-    god:     { name:'СТАРЫЙ БОГ', time:45,  speed:2.2, chaseMult:1.5, viewDist:2,    wallHits:0, knows:true, touch:true,  canHear:true },
+    peaceful: { name:'МИРНЫЙ',   time:210, speed:45,  chaseMult:1, viewDist:0.90, wallHits:0, knows:false, touch:false, canHear:false },
+    easy:    { name:'ЛЁГКИЙ',    time:210,  speed:0.7, chaseMult:1, viewDist:1,    wallHits:4, knows:false, touch:false, canHear:true  },
+    medium:  { name:'СРЕДНИЙ',   time:210,  speed:1.0, chaseMult:1.15, viewDist:1.15, wallHits:2, knows:false, touch:false, canHear:true },
+    hard:    { name:'СЛОЖНЫЙ',   time:210,  speed:1.5, chaseMult:1.3, viewDist:1.3,  wallHits:1, knows:true,  touch:false, canHear:true },
+    god:     { name:'СТАРЫЙ БОГ', time:210,  speed:2.2, chaseMult:1.5, viewDist:2,    wallHits:0, knows:true, touch:true,  canHear:true },
   };
 
   // ---- СПАВН в комнате (пустой пол, не дверь, не стена) ----
@@ -744,11 +744,11 @@
       '<div class="sub">Ты спрятался в заброшенной бойне. Продержись до приезда спецназа. Выбери режим.</div>'+
       '<div class="diff-title">— ВЫБЕРИ СЛОЖНОСТЬ —</div>'+
       '<div class="diff-panel" id="diffPanel">'+
-        '<button class="diff-btn" data-d="peaceful"><span class="d-label">МИРНЫЙ</span><span class="d-desc">Не ломает стены, не знает где ты. Неторопливый.</span><span class="d-time">100с</span></button>'+
-        '<button class="diff-btn" data-d="easy"><span class="d-label">ЛЁГКИЙ</span><span class="d-desc">Ломает стены и шкафы за 4 удара. Бежит, когда видит тебя.</span><span class="d-time">90с</span></button>'+
-        '<button class="diff-btn" data-d="medium"><span class="d-label">СРЕДНИЙ</span><span class="d-desc">В 2.5 раза быстрее. Ломает за 2 удара.</span><span class="d-time">90с</span></button>'+
-        '<button class="diff-btn" data-d="hard"><span class="d-label">СЛОЖНЫЙ</span><span class="d-desc">В 5 раз быстрее. Ломает за 1 удар. Всегда знает где ты.</span><span class="d-time">45с</span></button>'+
-        '<button class="diff-btn" data-d="god"><span class="d-label">СТАРЫЙ БОГ</span><span class="d-desc">В 11 раз быстрее. Знает всё. Ломает при касании.</span><span class="d-time">45с</span></button>'+
+        '<button class="diff-btn" data-d="peaceful"><span class="d-label">МИРНЫЙ</span><span class="d-desc">Не ломает стены, не знает где ты. Неторопливый.</span><span class="d-time">3.5 мин</span></button>'+
+        '<button class="diff-btn" data-d="easy"><span class="d-label">ЛЁГКИЙ</span><span class="d-desc">Ломает стены и шкафы за 4 удара. Бежит, когда видит тебя.</span><span class="d-time">3.5 мин</span></button>'+
+        '<button class="diff-btn" data-d="medium"><span class="d-label">СРЕДНИЙ</span><span class="d-desc">В 2.5 раза быстрее. Ломает за 2 удара.</span><span class="d-time">3.5 мин</span></button>'+
+        '<button class="diff-btn" data-d="hard"><span class="d-label">СЛОЖНЫЙ</span><span class="d-desc">В 5 раз быстрее. Ломает за 1 удар. Всегда знает где ты.</span><span class="d-time">3.5 мин</span></button>'+
+        '<button class="diff-btn" data-d="god"><span class="d-label">СТАРЫЙ БОГ</span><span class="d-desc">В 11 раз быстрее. Знает всё. Ломает при касании.</span><span class="d-time">3.5 мин</span></button>'+
       '</div>'+
       '<div class="foot" style="color:#bbb;margin-top:14px;"><b>МЫШЬ</b> — осмотреться · <b>W A S D</b> / <b>стрелки</b> — движение · <b>Shift</b> — бег · <b>E</b> — открыть/закрыть дверь, прятаться в шкаф · <b>F</b> — полноэкранный режим</div>';
     overlay.querySelectorAll('.diff-btn').forEach(b=>b.addEventListener('click', ()=>{
