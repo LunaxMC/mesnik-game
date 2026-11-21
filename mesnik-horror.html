@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <title>Мясник — продержись до спецназа</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -39,6 +40,11 @@
   .nick-row label { letter-spacing: 2px; }
   #nickInput { background: #0e0e0e; color: #ffd27a; border: 1px solid #ff2a2a; padding: 8px 12px; font-size: 16px; font-family: inherit; letter-spacing: 1px; width: 220px; text-align: center; margin-left: 6px; outline: none; }
   #nickInput:focus { border-color: #ffd27a; }
+  .mp-row { display: flex; gap: 10px; justify-content: center; margin: 6px 0; }
+  .mp-btn { background: #123a4a; color: #cfeeff; border: 1px solid #3aa0c9; padding: 10px 16px; font-size: 13px; font-family: inherit; letter-spacing: 1px; cursor: pointer; transition: all .15s; }
+  .mp-btn:hover { background: #1b5268; transform: translateY(-1px); }
+  .mp-status { font-size: 11px; color: #8fc8dd; max-width: 520px; margin: 8px auto; line-height: 1.4; min-height: 16px; }
+  #mpHostNick { background: #0e0e0e; color: #ffd27a; border: 1px solid #3aa0c9; padding: 7px 10px; font-size: 13px; font-family: inherit; outline: none; }
 </style>
 </head>
 <body>
@@ -283,6 +289,100 @@
   // скример
   let scaryTimer = 0;      // время до следующего возможного скримера
   let scaryActive = 0;     // длительность вспышки скримера
+
+  // ---- МУЛЬТИПЛЕЕР (PeerJS / WebRTC) ----
+  let peer = null;
+  let peerConn = null;              // активное P2P-соединение
+  let isHost = false;               // создатель лобби
+  let remotePlayer = null;          // {x,y,dirX,dirY,alive,nick}
+  let remoteButcher = null;         // позиция мясника, если управляет хост
+  let mpNick = 'Игрок';
+  // PeerJS требует ID из латиницы/цифр/`-_`; кириллицу транслитерируем в читаемый ID
+  function mpPeerId(nick){
+    const translit = {
+      'а':'a','б':'b','в':'v','г':'g','д':'d','е':'e','ё':'e','ж':'zh','з':'z','и':'i','й':'y',
+      'к':'k','л':'l','м':'m','н':'n','о':'o','п':'p','р':'r','с':'s','т':'t','у':'u','ф':'f',
+      'х':'kh','ц':'ts','ч':'ch','ш':'sh','щ':'sch','ъ':'','ы':'y','ь':'','э':'e','ю':'yu','я':'ya',
+      'А':'A','Б':'B','В':'V','Г':'G','Д':'D','Е':'E','Ё':'E','Ж':'Zh','З':'Z','И':'I','Й':'Y',
+      'К':'K','Л':'L','М':'M','Н':'N','О':'O','П':'P','Р':'R','С':'S','Т':'T','У':'U','Ф':'F',
+      'Х':'Kh','Ц':'Ts','Ч':'Ch','Ш':'Sh','Щ':'Sch','Ъ':'','Ы':'Y','Ь':'','Э':'E','Ю':'Yu','Я':'Ya'
+    };
+    let s='';
+    for(const ch of String(nick||'')){ s += translit[ch]!==undefined ? translit[ch] : ch; }
+    s = s.replace(/[^A-Za-z0-9_-]/g,'').slice(0,16).replace(/^[_\-]+|[_\-]+$/g,'');
+    return s || 'player';
+  }
+  let mpClock = 0;                  // тикер отправки состояния
+  let mpErrEl = null;
+  function mpSend(obj){ if(peerConn && peerConn.open) { try{ peerConn.send(obj); }catch(e){} } }
+  function mpLog(t){ if(mpErrEl) mpErrEl.textContent=t; }
+
+  // Создать лобби: ник игрока и есть PeerID, к которому подключаются
+  function createLobby(){
+    stopAmbientDrone(); if(peer){ try{peer.destroy();}catch(e){} peer=null; peerConn=null; }
+    const _id = mpPeerId(mpNick);
+    mpLog('Создаю лобби: '+mpNick+' (id: '+_id+')...');
+    peer = new Peer(_id, { debug:0 });
+    isHost = true; lobbyMode('host');
+    peer.on('open', ()=>{ mpLog('Лобби создано! Ник: \''+mpNick+'\'. Друг должен ввести: '+_id); });
+    peer.on('error', (err)=>{ mpLog('Ошибка: '+ (err&&err.type||err)); if(String(err&&err.type).indexOf('unavailable')>=0) mpLog('Ник занят. Смени ник и создай снова.'); });
+    peer.on('connection', (conn)=>{
+      conn.on('open', ()=>{
+        peerConn=conn;
+        mpLog('Подключился: '+(remotePlayer&&remotePlayer.nick||'игрок'));
+        // хост передаёт гостю начальную карту и позиции
+        mpSend({t:'init', map:activeMapIdx, host:{x:player.x,y:player.y,dirX:player.dirX,dirY:player.dirY}, butcher:{x:butcher.x,y:butcher.y}});
+      });
+      conn.on('data', (d)=>{ onMpData(d); });
+      conn.on('close', ()=>{ peerConn=null; remotePlayer=null; mpLog('Игрок отключился'); });
+    });
+  }
+  // Присоединиться: указываем ник хоста
+  function joinLobby(hostNick){
+    stopAmbientDrone(); if(peer){ try{peer.destroy();}catch(e){} peer=null; }
+    const _hid = mpPeerId(hostNick);
+    mpLog('Подключаюсь к: '+hostNick+'...');
+    peer = new Peer({ debug:0 });
+    isHost=false; lobbyMode('guest');
+    peer.on('open', ()=>{
+      const conn = peer.connect(_hid, { reliable:true });
+      conn.on('open', ()=>{ peerConn=conn; mpLog('Подключено к лобби: '+hostNick); mpSend({t:'hello', nick:mpNick}); });
+      conn.on('data', (d)=>{ onMpData(d); });
+      conn.on('close', ()=>{ peerConn=null; remotePlayer=null; mpLog('Соединение закрыто'); });
+    });
+    peer.on('error', (err)=>{ mpLog('Ошибка: '+(err&&err.type||err)); });
+  }
+  function lobbyMode(m){ /* placeholder — UI переключение в меню */ }
+  // приём данных
+  function onMpData(d){
+    if(!d||typeof d!=='object') return;
+    if(d.t==='hello'){ remotePlayer = {nick:d.nick||'?', x:player.x, y:player.y, dirX:1, dirY:0, alive:true}; }
+    else if(d.t==='init' && !isHost){ // гость получает карту/спавн от хоста
+      if(typeof d.map==='number') buildMap(d.map);
+      if(d.host){ player.x=d.host.x; player.y=d.host.y; player.dirX=d.host.dirX||1; player.dirY=d.host.dirY||0; }
+      remotePlayer={nick:'ХОСТ', x:d.host?d.host.x:0, y:d.host?d.host.y:0, dirX:1, dirY:0, alive:true};
+      if(d.butcher){ butcher.x=d.butcher.x; butcher.y=d.butcher.y; }
+      mpLog('Синхронизировано. Играй!');
+    }
+    else if(d.t==='pos'){ if(d.remote){ remotePlayer = d.remote; } }
+    else if(d.t==='butcher'){ if(d.remote && !isHost){ butcher.x=d.remote.x; butcher.y=d.remote.y; } }
+    else if(d.t==='scare'){ scareActive=0.9; scareVariant=Math.floor(Math.random()*4); }
+    else if(d.t==='win'){ winRemote(); }
+    else if(d.t==='death'){ }
+  }
+  // отправка состояния в цикле
+  function mpTick(dt){
+    if(!peerConn || !peerConn.open) return;
+    mpClock-=dt;
+    if(mpClock>0) return; mpClock=0.05;
+    if(isHost){ // хост управляет игроком и мясником
+      mpSend({t:'pos', remote:{x:player.x,y:player.y,dirX:player.dirX,dirY:player.dirY,alive:true}});
+      mpSend({t:'butcher', remote:{x:butcher.x,y:butcher.y}});
+    } else { // гость только шлёт игрока
+      mpSend({t:'pos', remote:{x:player.x,y:player.y,dirX:player.dirX,dirY:player.dirY,alive:true}});
+    }
+  }
+  function winRemote(){ state='win'; showOverlay('win'); }
 
   // ---- УПРАВЛЕНИЕ ----
   document.addEventListener('keydown', e => {
@@ -627,6 +727,8 @@
         g.y+=Math.sin(ang)*g.speed*dt;
       }
     }
+    // синхронизация мультиплеера
+    if(peerConn && peerConn.open) mpTick(dt);
   }
 
   // спавн призрака на некотором расстоянии от игрока (может быть в стене)
@@ -887,6 +989,13 @@
       '<div class="nick-row"><label>КАРТА: </label><select id="mapSelect">'+
         MAP_PRESETS.map((p,i)=>'<option value="'+i+'"'+(i===activeMapIdx?' selected':'')+'>'+p.name+'</option>').join('')+
       '</select></div>'+
+      '<div class="diff-title">— МУЛЬТИПЛЕЕР —</div>'+
+      '<div class="mp-row">'+
+        '<button class="mp-btn" id="mpCreate">СОЗДАТЬ ЛОББИ</button>'+
+        '<button class="mp-btn" id="mpJoin">ПРИСОЕДИНИТЬСЯ</button>'+
+      '</div>'+
+      '<div class="nick-row"><label>НИК ХОСТА: </label><input id="mpHostNick" maxlength="16" placeholder="введи ник друга" style="width:180px;"></div>'+
+      '<div class="mp-status" id="mpStatus">Лобби не создано. По нику: создай — друг введёт твой ник, либо введи ник друга и жми «присоединиться».</div>'+
       '<div class="diff-title">— ВЫБЕРИ СЛОЖНОСТЬ —</div>'+
       '<div class="diff-panel" id="diffPanel">'+
         '<button class="diff-btn" data-d="peaceful"><span class="d-label">МИРНЫЙ</span><span class="d-desc">ИИ-мясник, неторопливый. Не ломает стены.</span><span class="d-time">3.5 мин</span></button>'+
@@ -900,11 +1009,25 @@
     nickInput.addEventListener('input', ()=>{
       playerNick = nickInput.value.trim().slice(0,16) || 'Игрок';
       localStorage.setItem('msn_nick', playerNick);
+      mpNick = playerNick;
+    });
+    mpErrEl = document.getElementById('mpStatus');
+    const hostNickInput = document.getElementById('mpHostNick');
+    document.getElementById('mpCreate').addEventListener('click', ()=>{
+      if(nickInput) { playerNick = nickInput.value.trim().slice(0,16)||'Игрок'; localStorage.setItem('msn_nick', playerNick); mpNick=playerNick; }
+      createLobby();
+    });
+    document.getElementById('mpJoin').addEventListener('click', ()=>{
+      const h = hostNickInput ? hostNickInput.value.trim().slice(0,16) : '';
+      if(!h){ mpLog('Введи ник хоста'); return; }
+      if(nickInput) { playerNick = nickInput.value.trim().slice(0,16)||'Игрок'; localStorage.setItem('msn_nick', playerNick); mpNick=playerNick; }
+      joinLobby(h);
     });
     overlay.querySelectorAll('.diff-btn').forEach(b=>b.addEventListener('click', ()=>{
       difficultyKey=b.dataset.d;
       if(nickInput) playerNick = (nickInput.value.trim().slice(0,16))||'Игрок';
       localStorage.setItem('msn_nick', playerNick);
+      mpNick = playerNick;
       const mapSel = document.getElementById('mapSelect');
       if(mapSel) buildMap(parseInt(mapSel.value,10));
       applyMode(difficultyKey);
@@ -1253,6 +1376,60 @@ if(hitVal==='#'||hitVal==='C'||hitVal==='D') break;
     ctx.fillStyle='rgba(0,0,0,0.5)';
     ctx.beginPath(); ctx.ellipse(cx, bodyY+rad*1.6, rad*0.8, rad*0.2, 0, 0, Math.PI*2); ctx.fill();
     ctx.restore();
+
+    // === УДАЛЁННЫЙ ИГРОК (мультиплеер): оранжевый комбинезон, шлем, визор ===
+    if(remotePlayer && remotePlayer.alive!==false){
+      const rspx = remotePlayer.x - player.x;
+      const rspy = remotePlayer.y - player.y;
+      const rinv = 1/(player.planeX*player.dirY - player.dirX*player.planeY);
+      const rtx = rinv*(player.dirY*rspx - player.dirX*rspy);
+      const rty = rinv*(-player.planeY*rspx + player.planeX*rspy);
+      if(rty>0.05){
+        const rsx = Math.floor((W/2)*(1+rtx/rty));
+        const rh = Math.abs(Math.floor(H/rty));
+        const rw = Math.abs(Math.floor(H/rty)*0.42);
+        const ry0 = Math.max(0, Math.floor(-rh/2+H/2));
+        const rzb = zbuffer[Math.min(W-1, Math.max(0,rsx))]||0;
+        if(rty <= rzb){
+          ctx.fillStyle='#000'; ctx.fillRect(rsx-rw, ry0+rh*0.55, rw*2, rh*0.5); // тень
+          // ноги (тёмные ботинки)
+          ctx.fillStyle='#20242a';
+          ctx.beginPath(); ctx.ellipse(rsx-rw*0.28, ry0+rh*0.95, rw*0.18, rh*0.09, 0, 0, Math.PI*2); ctx.fill();
+          ctx.beginPath(); ctx.ellipse(rsx+rw*0.28, ry0+rh*0.95, rw*0.18, rh*0.09, 0, 0, Math.PI*2); ctx.fill();
+          // оранжевый комбинезон
+          const og = ctx.createLinearGradient(rsx-rw, ry0+rh*0.4, rsx+rw, ry0+rh*0.95);
+          og.addColorStop(0,'#ff9a2a'); og.addColorStop(1,'#d96a10');
+          ctx.fillStyle=og;
+          ctx.beginPath();
+          ctx.moveTo(rsx-rw*0.5, ry0+rh*0.35);
+          ctx.quadraticCurveTo(rsx, ry0+rh*0.2, rsx+rw*0.5, ry0+rh*0.35);
+          ctx.lineTo(rsx+rw*0.6, ry0+rh*0.98);
+          ctx.lineTo(rsx-rw*0.6, ry0+rh*0.98);
+          ctx.closePath(); ctx.fill();
+          // шлем с визором
+          const hg = ctx.createLinearGradient(rsx-rw*0.3, ry0+rh*0.05, rsx+rw*0.3, ry0+rh*0.35);
+          hg.addColorStop(0,'#3a4148'); hg.addColorStop(1,'#1b1e22');
+          ctx.fillStyle=hg;
+          ctx.beginPath(); ctx.arc(rsx, ry0+rh*0.3, rw*0.32, 0, Math.PI*2); ctx.fill();
+          // визор (тёмный, с бликом)
+          ctx.fillStyle='#0b0d10';
+          ctx.beginPath(); ctx.ellipse(rsx, ry0+rh*0.3, rw*0.26, rw*0.13, 0, 0, Math.PI*2); ctx.fill();
+          ctx.fillStyle='rgba(255,255,255,0.18)';
+          ctx.beginPath(); ctx.ellipse(rsx-rw*0.08, ry0+rh*0.27, rw*0.1, rw*0.04, 0, 0, Math.PI*2); ctx.fill();
+          // значок на груди
+          ctx.fillStyle='#ffd24a';
+          ctx.fillRect(rsx-rw*0.07, ry0+rh*0.55, rw*0.14, rw*0.07);
+          // перчатки-кисти
+          ctx.fillStyle='#1a1d20';
+          ctx.beginPath(); ctx.arc(rsx+rw*0.55, ry0+rh*0.45, rw*0.09, 0, Math.PI*2); ctx.fill();
+          ctx.beginPath(); ctx.arc(rsx-rw*0.55, ry0+rh*0.6, rw*0.09, 0, Math.PI*2); ctx.fill();
+          // ник над головой
+          ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.font=Math.max(10,rh*0.06)+'px Courier New';
+          ctx.textAlign='center';
+          ctx.fillText(remotePlayer.nick||'Ребята', rsx, ry0+rh*0.06);
+        }
+      }
+    }
 
     // === ПРИЗРАКИ (полупрозрачные, проходят сквозь стены) ===
     for(const g of ghosts){
