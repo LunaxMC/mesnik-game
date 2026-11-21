@@ -44,11 +44,13 @@
   <div class="status">
     <div id="godMsg" class="god">☠ ТЫ БОГ — ДОГОНИ ЕГО</div>
     <div id="panicMsg" class="panic">⚠ ОН ВИДИТ ТЕБЯ</div>
-    <div id="hintDoor" class="hint">E — открыть дверь</div>
+    <div id="hintDoor" class="hint">E — открыть дверь / сундук</div>
     <div id="hintCloset" class="hint">E — спрятаться в шкаф</div>
+    <div id="invMsg" class="hint" style="color:#ffd27a;">—</div>
   </div>
   <div class="timer" id="timer">1:30</div>
 </div>
+<div id="flashMsg" style="position:fixed;top:22%;left:50%;transform:translateX(-50%);font-size:22px;color:#ffd27a;text-shadow:0 0 10px #000;font-weight:bold;opacity:0;transition:opacity .3s;pointer-events:none;z-index:6;"> </div>
 
 <div id="overlay">
   <h1>МЯСНИК</h1>
@@ -68,6 +70,9 @@
   const godMsgEl = document.getElementById('godMsg');
   const hintDoorEl = document.getElementById('hintDoor');
   const hintClosetEl = document.getElementById('hintCloset');
+  const invMsgEl = document.getElementById('invMsg');
+  const flashMsgEl = document.getElementById('flashMsg');
+  let flashTimer=0;
 
   let W = 800, H = 600;
   function resize(){
@@ -82,10 +87,10 @@
   const TILE = 1; // 1 = размер клетки в мире (для raycasting)
 
   // ---- КАРТА (большая, комнаты + коридоры) ----
-  // # стена, . пол, C шкаф, D дверь (открывается/закрывается), P спавн игрока, B спавн мясника
+  // # стена, . пол, C шкаф, D дверь (открывается/закрывается), T сундук с лутом, P спавн игрока, B спавн мясника
   const MAP = [
     "###############################################",
-    "#..P..................#.....................#",
+    "#..P..................#....T................#",
     "#.#####.#####.#########.#.###################.#",
     "#.#.....#...#.#.......#.#.#.......#.......#...#",
     "#.#.#####D###.###.#####D###.#####.#####D###.#.#",
@@ -146,7 +151,7 @@
     "###########.#####.#####.######D###########.####",
     "#.......................#.....................#",
     "###############################################",
-  ];
+  ].map(row => row.split('')); // строки -> изменяемые массивы символов (иначе MAP[y][x]='.' молча не работает)
   const COLS = MAP[0].length, ROWS = MAP.length;
 
   function insideMap(tx,ty){ return tx>=0 && ty>=0 && tx<COLS && ty<ROWS; }
@@ -154,6 +159,7 @@
   function isCloset(tx,ty){ return insideMap(tx,ty) && MAP[ty][tx]==='C'; }
   function isDoor(tx,ty){ return insideMap(tx,ty) && (MAP[ty][tx]==='D'||MAP[ty][tx]==='O'); }
   function isDoorClosed(tx,ty){ return insideMap(tx,ty) && MAP[ty][tx]==='D'; }
+  function isChest(tx,ty){ return insideMap(tx,ty) && MAP[ty][tx]==='T'; }
   function isBlocking(tx,ty){
     return isWall(tx,ty) || isDoorClosed(tx,ty) || (isCloset(tx,ty) && !(player && player.inCloset && player.inCloset.ty===ty && player.inCloset.tx===tx));
   }
@@ -207,7 +213,12 @@
     dirX: 1, dirY: 0,
     planeX: 0, planeY: 0.66,
     speed: 3.2, runMult: 1.6,
-    inCloset: null
+    inCloset: null,
+    // лут / снаряжение
+    batts: 0,        // батарейки для фонаря (макс 3)
+    club: false,     // булава (соударение с мясником)
+    serum: false,    // сыворотка способностей (The Boys)
+    serumUsed: false
   };
   const butcher = {
     x: bs.tx + 0.5, y: bs.ty + 0.5,
@@ -224,11 +235,14 @@
   let godMode = false;
   let godCatchT = 0;
   let deathT = 0, deathPhase = 0;
+  let serumTimer = 0;
+  let clubCooldown = 0;
 
   // ---- УПРАВЛЕНИЕ ----
   document.addEventListener('keydown', e => {
     keys[e.code]=true;
     if(e.code==='KeyE' && state==='playing' && !godMode) interactE();
+    if(e.code==='KeyQ' && state==='playing' && !godMode) useSerum();
     if(e.code==='Shift') e.preventDefault();
     if(e.code==='KeyT' && state==='playing' && !godMode) activateGod();
     if(e.code==='KeyF') toggleFullscreen();
@@ -253,6 +267,10 @@
   });
   canvas.addEventListener('click', () => {
     if(state==='playing'){ try { if(document.pointerLockElement!==canvas) canvas.requestPointerLock(); } catch(e){} }
+  });
+  canvas.addEventListener('mousedown', (e)=>{
+    if(e.button!==0) return;
+    if(state==='playing' && player.club && !godMode) useClub();
   });
   document.addEventListener('pointerlockchange', () => {
     mouseLocked = (document.pointerLockElement===canvas);
@@ -282,21 +300,93 @@
     return true;
   }
 
-  // ---- ВЗАИМОДЕЙСТВИЕ ПО E: дверь (открыть/закрыть) ИЛИ шкаф ----
+  // ---- ВЗАИМОДЕЙСТВИЕ ПО E: дверь (открыть/закрыть) ИЛИ сундук ИЛИ шкаф ----
   function interactE(){
     if(player.inCloset){ player.inCloset=null; return; }
     const tx=Math.floor(player.x), ty=Math.floor(player.y);
     const dirs=[[1,0],[-1,0],[0,1],[0,-1],[0,0]];
-    // сперва дверь рядом
+    // сундук рядом -> открыть сразу
+    for(const [dx,dy] of dirs){ const nx=tx+dx, ny=ty+dy; if(isChest(nx,ny)){ openChest(nx,ny); return; } }
+    // дверь рядом
     for(const [dx,dy] of dirs){
       const nx=tx+dx, ny=ty+dy;
-      if(isDoor(nx,ny)){
-        // toggle: если закрыта -> открыть, если открыта -> закрыть
-        MAP[ny][nx] = MAP[ny][nx]==='D' ? 'O' : 'D';
-        return;
-      }
+      if(isDoor(nx,ny)){ MAP[ny][nx] = MAP[ny][nx]==='D' ? 'O' : 'D'; return; }
+    }
+    // дверь/сундук ПО ЛУЧУ ВЗГЛЯДА (первое лицо)
+    const found = traceForDoor();
+    if(found){
+      if(found.type==='door'){ MAP[found.ty][found.tx] = MAP[found.ty][found.tx]==='D' ? 'O' : 'D'; }
+      else openChest(found.tx, found.ty);
+      return;
     }
     toggleCloset();
+  }
+
+  function traceForDoor(){
+    const cx=player.x, cy=player.y;
+    const dx=player.dirX, dy=player.dirY;
+    for(let t=0.2; t<=2.8; t+=0.2){
+      const px=cx+dx*t, py=cy+dy*t;
+      const tx=Math.floor(px), ty=Math.floor(py);
+      // сундук раньше тела (не блокирует взгляд полностью)
+      if(isChest(tx,ty)) return {tx,ty,type:'chest'};
+      if(isDoor(tx,ty)) return {tx,ty,type:'door'};
+      if(tx!==Math.floor(cx)||ty!==Math.floor(cy)){ if(isWall(tx,ty)) return null; }
+    }
+    return null;
+  }
+
+  function openChest(tx, ty){
+    if(!isChest(tx,ty)) return;
+    MAP[ty][tx]='.'; // сундук открыт, превращается в пол
+    const roll = Math.random();
+    // Одна случайная вещь из трёх
+    if(roll < 0.34){ // батарейка для фонаря
+      player.batts = Math.min(3, player.batts + 1);
+      flashMsg('Батарейка для фонаря (+1)');
+    } else if(roll < 0.67){ // булава
+      player.club = true;
+      flashMsg('БУЛАВА! ЛКМ — бей мясника вблизи');
+    } else { // сыворотка способностей (как в The Boys)
+      player.serum = true;
+      flashMsg('СЫВОРОТКА СПОСОБНОСТЕЙ! Q — уколоться');
+    }
+  }
+
+  // лёгкое мгновенное сообщение по центру
+  function flashMsg(txt){
+    flashMsgEl.textContent = txt;
+    flashMsgEl.style.opacity = '1';
+    flashTimer = 2.0;
+  }
+
+  // БУЛАВА: толчок/оглушение мясника на ближней дистанции
+  function useClub(){
+    const d = dist(player.x, player.y, butcher.x, butcher.y);
+    if(d < 1.4){
+      // отбрасываем мясника назад от игрока
+      const ang = Math.atan2(butcher.y - player.y, butcher.x - player.x);
+      butcher.x += Math.cos(ang)*0.9;
+      butcher.y += Math.sin(ang)*0.9;
+      butcher.axeTimer = 1.0; // мясник оглушён на мгновение (не атакует)
+      flashMsg('ТЫ ОГЛУШИЛ ЕГО!');
+      // след удара
+      butcher.axeTrail = 0.3; butcher.axeTarget = {tx:Math.floor(player.x)+1, ty:Math.floor(player.y)};
+    } else {
+      flashMsg('Слишком далеко для булавы');
+    }
+  }
+
+  // СЫВОРОТКА: временный рывок скорости/силы (как Compound V)
+  function useSerum(){
+    if(!player.serum) { flashMsg('Нет сыворотки — ищи сундуки'); return; }
+    if(player.serumUsed) { flashMsg('Сыворотка уже использована'); return; }
+    player.serumUsed = true;
+    serumTimer = 12; // 12 сек суперсилы
+    player.club = true; // даёт и булаву, если её ещё не было
+    flashMsg('⚡ СЫВОРОТКА! Ты быстрее и сильнее, но ненадолго');
+    butcher.ang = Math.atan2(butcher.y-player.y, butcher.x-player.x);
+    butcher.chaseTimer = 0;
   }
 
   function toggleCloset(){
@@ -365,7 +455,8 @@
 
     // движение первого лица
     const run = keys['ShiftLeft']||keys['ShiftRight'];
-    const spd = player.speed*(run?player.runMult:1)*(godMode?1.5:1);
+    const serumBoost = serumTimer>0 ? 1.45 : 1;
+    const spd = player.speed*(run?player.runMult:1)*(godMode?1.5:1)*serumBoost;
     let mx=0, my=0;
     if(keys['KeyW']||keys['ArrowUp']) mx += player.dirX, my += player.dirY;
     if(keys['KeyS']||keys['ArrowDown']) mx -= player.dirX, my -= player.dirY;
@@ -429,8 +520,24 @@
       moveButcher(butcher.ang, butcher.speed*0.5, dt, true);
     }
 
-    if(!player.inCloset && dToPlayer<butcher.catchDist && (currentMode.knows||playerVisible)) startDeath();
+    if(!player.inCloset && dToPlayer<butcher.catchDist && (currentMode.knows||playerVisible) && !clubStun) startDeath();
     if(!currentMode.knows && player.inCloset && dToPlayer<0.5) startDeath();
+
+    // таймеры предметов
+    if(serumTimer>0) serumTimer-=dt;
+    if(flashTimer>0){ flashTimer-=dt; if(flashTimer<=0) flashMsgEl.style.opacity='0'; }
+    updateInvHUD();
+  }
+
+  let clubStun=false;
+  function updateInvHUD(){
+    let s='';
+    s += (player.batts>0 ? ('🔦'+player.batts) : '—');
+    s += ' · ';
+    s += (player.club ? '🔨булава' : '·');
+    s += (player.serum && !player.serumUsed ? ' · 💉сыворотка' : '');
+    if(serumTimer>0) s += ' · ⚡СВЕРХ( '+Math.ceil(serumTimer)+'с)';
+    invMsgEl.textContent = s;
   }
 
   function updateHints(){
@@ -521,6 +628,10 @@
     butcher.axeTimer=0; butcher.axeTarget=null; butcher.axeTrail=0;
     butcher.lastSeen=null; butcher.chaseTimer=0; butcher.heardCooldown=0;
     godMode=false; panicEl.classList.remove('on'); godMsgEl.style.opacity=0;
+    // сброс лута/предметов
+    player.batts=0; player.club=false; player.serum=false; player.serumUsed=false;
+    serumTimer=0; clubCooldown=0;
+    flashMsgEl.style.opacity='0'; flashTimer=0;
     if(currentMode) applyMode(difficultyKey);
     deathT=0; state='playing'; shutter=0;
     overlay.classList.add('hidden');
@@ -607,6 +718,7 @@ if(hitVal==='#'||hitVal==='C'||hitVal==='D') break;
       if(hitVal==='#') col='#3a3a40';
       else if(hitVal==='C') col='#3d3a30';
       else if(hitVal==='D') col='#6b4f2a';
+      else if(hitVal==='T') col='#b08840';
       else col='#222';
 
       if(side===1) col = shadeCol(col, 0.65); // боковые затемнены
@@ -708,8 +820,9 @@ if(hitVal==='#'||hitVal==='C'||hitVal==='D') break;
     const zb = render3D();
     if(state==='playing'||state==='dying') renderSprites(zb);
     // затемнение виньетки
+    const flash = player.batts>0 ? 0.28 : 0.5; // батарейки дают фонарь — светло, фонарь тратит батарейку
     const grad = ctx.createRadialGradient(W/2,H/2,H*0.2,W/2,H/2,H*0.85);
-    grad.addColorStop(0,'rgba(0,0,0,0)'); grad.addColorStop(1,'rgba(0,0,0,0.5)');
+    grad.addColorStop(0,'rgba(0,0,0,0)'); grad.addColorStop(1,'rgba(0,0,0,'+flash+')');
     ctx.fillStyle=grad; ctx.fillRect(0,0,W,H);
 
     if(panicEl.classList.contains('on')){
