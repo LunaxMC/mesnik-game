@@ -257,6 +257,7 @@
   // скример
   let nextScare = 8;     // через сколько секунд возможен скример (случайно)
   let scareActive = 0;   // длительность скримера на экране
+  let scareVariant = 0;  // вариант лица/звука скримера
   // скример
   let scaryTimer = 0;      // время до следующего возможного скримера
   let scaryActive = 0;     // длительность вспышки скримера
@@ -465,6 +466,7 @@
   function update(dt){
     if(state!=='playing' && state!=='dying') return;
     if(state==='dying'){ deathT+=dt; return; }
+    updateDroneIntensity();
 
     timeLeft -= dt;
     if(timeLeft<=0){
@@ -571,7 +573,7 @@
       moveButcher(butcher.ang, butcher.speed*0.5, dt, true);
     }
 
-    if(!player.inCloset && dToPlayer<butcher.catchDist && (currentMode.knows||playerVisible) && !clubStun) startDeath();
+    if(butcher.invisible<=0 && !player.inCloset && dToPlayer<butcher.catchDist && (currentMode.knows||playerVisible) && !clubStun) startDeath();
     if(!currentMode.knows && player.inCloset && dToPlayer<0.5) startDeath();
 
     // таймеры предметов
@@ -594,33 +596,43 @@
 
   function startScare(){
     scareActive = 0.9; // вспышка ~0.9 сек
-    playScareSound();
+    scareVariant = Math.floor(Math.random()*4); // 0..3 — разное лицо каждый раз
+    playScareSound(scareVariant, 1);
   }
 
-  function playScareSound(){
+  function playScareSound(variant, gainMul){
     try{
-      // Резкий звук скримера (WebAudio, без внешних файлов): диссонансные высокие + шумовой удар
       const AC = window.AudioContext||window.webkitAudioContext;
       if(!AC) return;
       if(!window.__ac) window.__ac = new AC();
       const ac = window.__ac;
       if(ac.state==='suspended') ac.resume();
       const t0 = ac.currentTime;
-      // громкий шумовой удар
+      const v = variant || 0;
+      const mul = gainMul || 1;
+      // шумовой удар
       const dur = 0.5;
       const buf = ac.createBuffer(1, Math.floor(ac.sampleRate*dur), ac.sampleRate);
       const data = buf.getChannelData(0);
       for(let i=0;i<data.length;i++){ data[i] = (Math.random()*2-1) * Math.exp(-3*i/data.length); }
       const src = ac.createBufferSource(); src.buffer=buf;
-      const g = ac.createGain(); g.gain.value = 0.5;
+      const g = ac.createGain(); g.gain.value = 0.5*mul;
       src.connect(g); g.connect(ac.destination); src.start(t0);
-      // пронзительный диссонанс (две близкие частоты)
+      const og=ac.createGain(); og.gain.setValueAtTime(0.4*mul,t0); og.gain.exponentialRampToValueAtTime(0.001,t0+0.6);
+      og.connect(ac.destination);
+      // разные диссонансные «крики»
       const o1=ac.createOscillator(), o2=ac.createOscillator();
-      o1.type='sawtooth'; o2.type='square';
-      o1.frequency.value=880; o2.frequency.value=920;
-      const og=ac.createGain(); og.gain.setValueAtTime(0.4,t0); og.gain.exponentialRampToValueAtTime(0.001,t0+0.6);
-      o1.connect(og); o2.connect(og); og.connect(ac.destination);
-      o1.start(t0); o2.start(t0); o1.stop(t0+0.6); o2.stop(t0+0.6);
+      const variants=[
+        {t1:'sawtooth',t2:'square', f1:880, f2:920, c1:0, c2:0},
+        {t1:'sawtooth',t2:'sawtooth', f1:1240, f2:660, c1:0, c2:0.15},  // визг
+        {t1:'square',t2:'square', f1:740, f2:1180, c1:0.3, c2:0},        // хриплый
+        {t1:'sawtooth',t2:'square', f1:500, f2:1040, c1:0.5, c2:0.4},    // низкий рык
+      ];
+      const cfg=variants[v % variants.length];
+      o1.type=cfg.t1; o2.type=cfg.t2;
+      o1.frequency.value=cfg.f1; o2.frequency.value=cfg.f2;
+      o1.connect(og); o2.connect(og);
+      o1.start(t0+cfg.c1); o2.start(t0+cfg.c2); o1.stop(t0+0.6); o2.stop(t0+0.6);
     }catch(e){}
   }
 
@@ -632,6 +644,54 @@
     s += (player.serum && !player.serumUsed ? ' · 💉сыворотка' : '');
     if(serumTimer>0) s += ' · ⚡СВЕРХ( '+Math.ceil(serumTimer)+'с)';
     invMsgEl.textContent = s;
+  }
+
+  // ---- ПОСТОЯННЫЙ НИЗКИЙ ГУЛ (ambient drone) ----
+  let __drone = null; // набор нод гудящего фона
+  function startAmbientDrone(){
+    try{
+      const AC = window.AudioContext||window.webkitAudioContext;
+      if(!AC) return;
+      if(!window.__ac) window.__ac = new AC();
+      const ac = window.__ac;
+      if(ac.state==='suspended') ac.resume();
+      if(__drone) return; // уже играет
+      const master = ac.createGain(); master.gain.value = 0.05;
+      master.connect(ac.destination);
+      // низкий гул: два слегка расстроенных синуса ~ 41 Гц и 53 Гц (борьба биений)
+      const o1=ac.createOscillator(); o1.type='sine'; o1.frequency.value=41;
+      const o2=ac.createOscillator(); o2.type='sine'; o2.frequency.value=53;
+      const og1=ac.createGain(); og1.gain.value=0.5;
+      const og2=ac.createGain(); og2.gain.value=0.35;
+      o1.connect(og1); og1.connect(master);
+      o2.connect(og2); og2.connect(master);
+      // лёгкий «ветер» — белый шум через низкочастотный фильтр, тихо
+      const len=ac.sampleRate*2;
+      const nb=ac.createBuffer(1,len,ac.sampleRate);
+      const nd=nb.getChannelData(0);
+      for(let i=0;i<len;i++) nd[i]=(Math.random()*2-1)*0.6;
+      const ns=ac.createBufferSource(); ns.buffer=nb; ns.loop=true;
+      const nf=ac.createBiquadFilter(); nf.type='lowpass'; nf.frequency.value=220;
+      const ng=ac.createGain(); ng.gain.value=0.18;
+      ns.connect(nf); nf.connect(ng); ng.connect(master);
+      o1.start(); o2.start(); ns.start();
+      __drone = {master,o1,o2,ns};
+    }catch(e){}
+  }
+  function stopAmbientDrone(){
+    try{
+      if(!__drone) return;
+      try{ __drone.o1.stop(); __drone.o2.stop(); __drone.ns.stop(); }catch(e){}
+      try{ __drone.master.disconnect(); }catch(e){}
+      __drone=null;
+    }catch(e){}
+  }
+  // интенсивность гула растёт с близостью мясника
+  function updateDroneIntensity(){
+    if(!__drone) return;
+    const d = dist(player.x,player.y,butcher.x,butcher.y);
+    const prox = Math.max(0, Math.min(1, 1 - d/6)); // 0 далеко, 1 вплотную
+    try{ __drone.master.gain.value = 0.05 + prox*0.12; }catch(e){}
   }
 
   function updateHints(){
@@ -647,7 +707,7 @@
     hintClosetEl.classList.toggle('show', closet && !door && !player.inCloset);
   }
 
-  function startDeath(){ state='dying'; deathT=0; deathPhase=0; }
+  function startDeath(){ state='dying'; deathT=0; deathPhase=0; scareActive=0.9; scareVariant=Math.floor(Math.random()*4); playScareSound(scareVariant, 1.5); }
   function die(){ state='dead'; showOverlay('dead'); }
   function win(){ state='win'; showOverlay('win'); }
 
@@ -737,6 +797,7 @@
   let difficultyKey='easy';
   function showMenu(){
     state='menu';
+    stopAmbientDrone();
     if(document.pointerLockElement) document.exitPointerLock();
     overlay.classList.remove('hidden'); overlay.className='';
     overlay.innerHTML =
@@ -755,6 +816,7 @@
       difficultyKey=b.dataset.d;
       applyMode(difficultyKey);
       resetGame(true);
+      startAmbientDrone();
     }));
   }
 
@@ -978,6 +1040,7 @@ if(hitVal==='#'||hitVal==='C'||hitVal==='D') break;
 
   // спрайт мясника (2.5D биллборд)
   function renderSprites(zbuffer){
+    if(butcher.invisible>0) return; // мясник пропал (невидим)
     const spx = butcher.x - player.x;
     const spy = butcher.y - player.y;
     const invDet = 1/(player.planeX*player.dirY - player.dirX*player.planeY);
@@ -1006,23 +1069,44 @@ if(hitVal==='#'||hitVal==='C'||hitVal==='D') break;
 
     // кровавый ореол
     ctx.shadowColor='rgba(150,0,0,0.8)'; ctx.shadowBlur = rad*0.3;
-    // тело
-    ctx.fillStyle='#5a1414';
-    ctx.beginPath(); ctx.arc(cx, bodyY, rad, 0, Math.PI*2); ctx.fill();
+    // ТЕЛО: объёмный торс с градиентом (3D-затенение) вместо плоского круга
+    const torsoGrad = ctx.createRadialGradient(cx-rad*0.3, bodyY-rad*0.4, rad*0.1, cx, bodyY, rad*1.3);
+    torsoGrad.addColorStop(0,'#8a2020');
+    torsoGrad.addColorStop(0.55,'#5a1414');
+    torsoGrad.addColorStop(1,'#2a0808');
+    ctx.fillStyle=torsoGrad;
+    ctx.beginPath(); ctx.arc(cx, bodyY, rad*1.25, 0, Math.PI*2); ctx.fill();
     ctx.shadowBlur = 0;
+    // голова: чуть светлее, объёмная
+    const headGrad = ctx.createRadialGradient(cx-rad*0.15, bodyY-rad*0.5, rad*0.05, cx, bodyY-rad*0.5, rad*0.6);
+    headGrad.addColorStop(0,'#d8c9a8');
+    headGrad.addColorStop(0.6,'#b09b7a');
+    headGrad.addColorStop(1,'#6e5a40');
+    ctx.fillStyle=headGrad;
+    ctx.beginPath(); ctx.arc(cx, bodyY-rad*0.5, rad*0.55, 0, Math.PI*2); ctx.fill();
     // фартук
     ctx.fillStyle='#3d0e0e';
     ctx.beginPath();
     ctx.moveTo(cx-rad*0.35, bodyY-rad*0.1);
     ctx.lineTo(cx+rad*0.35, bodyY-rad*0.1);
-    ctx.lineTo(cx+rad*0.55, bodyY+rad*0.9);
-    ctx.lineTo(cx-rad*0.55, bodyY+rad*0.9);
+    ctx.lineTo(cx+rad*0.6, bodyY+rad*0.95);
+    ctx.lineTo(cx-rad*0.6, bodyY+rad*0.95);
     ctx.closePath(); ctx.fill();
-    // кровь на фартуке
-    ctx.fillStyle='rgba(120,5,5,0.8)';
+    // кровь на фартуке (несколько пятен)
+    ctx.fillStyle='rgba(120,5,5,0.85)';
     ctx.beginPath(); ctx.ellipse(cx-rad*0.15, bodyY+rad*0.4, rad*0.25, rad*0.3, 0.4, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx+rad*0.2, bodyY+rad*0.6, rad*0.18, rad*0.22, -0.3, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx-rad*0.28, bodyY+rad*0.75, rad*0.12, rad*0.15, 0.2, 0, Math.PI*2); ctx.fill();
+    // руки: две тёмные руки, одна держит топор
+    ctx.fillStyle='#4a0f0f';
+    ctx.beginPath(); ctx.ellipse(cx+rad*0.85, bodyY-rad*0.1, rad*0.22, rad*0.5, -0.2, 0, Math.PI*2); ctx.fill(); // правая поднята к топору
+    ctx.beginPath(); ctx.ellipse(cx-rad*0.9, bodyY+rad*0.3, rad*0.2, rad*0.55, 0.2, 0, Math.PI*2); ctx.fill(); // левая опущена
+    // ноги
+    ctx.fillStyle='#2e1a08';
+    ctx.beginPath(); ctx.ellipse(cx+rad*0.35, bodyY+rad*1.4, rad*0.28, rad*0.5, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx-rad*0.35, bodyY+rad*1.4, rad*0.28, rad*0.5, 0, 0, Math.PI*2); ctx.fill();
     // глаза — белки
-    const eyeY = bodyY-rad*0.35, eyeDX=rad*0.22, eyeR=rad*0.16;
+    const eyeY = bodyY-rad*0.55, eyeDX=rad*0.2, eyeR=rad*0.15;
     ctx.fillStyle='#fff';
     ctx.beginPath(); ctx.arc(cx-eyeDX, eyeY, eyeR, 0, Math.PI*2); ctx.fill();
     ctx.beginPath(); ctx.arc(cx+eyeDX, eyeY, eyeR, 0, Math.PI*2); ctx.fill();
@@ -1036,9 +1120,9 @@ if(hitVal==='#'||hitVal==='C'||hitVal==='D') break;
     ctx.beginPath(); ctx.arc(cx+eyeDX-eyeR*0.15, eyeY-eyeR*0.2, eyeR*0.12, 0, Math.PI*2); ctx.fill();
     // шрам на лбу
     ctx.strokeStyle='rgba(80,5,5,0.9)'; ctx.lineWidth=Math.max(1,rad*0.03);
-    ctx.beginPath(); ctx.moveTo(cx-rad*0.45, bodyY-rad*0.55); ctx.lineTo(cx+rad*0.4, bodyY-rad*0.35); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx-rad*0.45, bodyY-rad*0.75); ctx.lineTo(cx+rad*0.4, bodyY-rad*0.55); ctx.stroke();
     // топор (рукоять поднята)
-    const ax = cx+rad*0.7, ay = bodyY-rad*0.5;
+    const ax = cx+rad*0.75, ay = bodyY-rad*0.6;
     ctx.save(); ctx.translate(ax,ay); ctx.rotate(-0.6);
     ctx.fillStyle='#8a7a5a'; ctx.fillRect(0,-rad*0.05, rad*1.1, rad*0.1); // рукоять
     ctx.fillStyle='#c9c9d4'; // лезвие
@@ -1053,30 +1137,6 @@ if(hitVal==='#'||hitVal==='C'||hitVal==='D') break;
     ctx.restore();
   }
 
-  function drawMinimap(){
-    const scale = 4;
-    const ox=8, oy=8;
-    ctx.save();
-    ctx.fillStyle='rgba(0,0,0,0.55)';
-    ctx.fillRect(ox-3, oy-3, COLS*scale+6, ROWS*scale+6);
-    for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++){
-      const c=MAP[y][x];
-      if(c==='#') ctx.fillStyle='#444';
-      else if(c==='C') ctx.fillStyle='#8b6f3a';
-      else if(c==='D') ctx.fillStyle='#a08040';
-      else if(c==='O') ctx.fillStyle='#7d7d8a';
-      else continue;
-      ctx.fillRect(ox+x*scale, oy+y*scale, scale, scale);
-    }
-    // игрок
-    ctx.fillStyle='#fff';
-    ctx.fillRect(ox+Math.floor(player.x)*scale, oy+Math.floor(player.y)*scale, scale, scale);
-    // мясник
-    ctx.fillStyle='#ff2a2a';
-    ctx.fillRect(ox+Math.floor(butcher.x)*scale, oy+Math.floor(butcher.y)*scale, scale, scale);
-    ctx.restore();
-  }
-
   function drawBloodSplash(x,y,scale){}
 
   function render(){
@@ -1085,6 +1145,18 @@ if(hitVal==='#'||hitVal==='C'||hitVal==='D') break;
     // затемнение экрана: плоское, без градиента (градиент даёт кольцевые полосы-артефакты)
     const flash = player.batts>0 ? 0.18 : 0.30;
     ctx.fillStyle='rgba(0,0,0,'+flash+')'; ctx.fillRect(0,0,W,H);
+
+    // СВЕТ МИГАЕТ, когда мясник рядом: дрожащее затемнение
+    if(state==='playing'){
+      const dn = dist(player.x,player.y,butcher.x,butcher.y);
+      if(dn < 4.5){
+        const proximity = Math.max(0, 1 - dn/4.5); // 1 — вплотную, 0 — далеко
+        const t = performance.now()/ (40 - proximity*25); // чаще с приближением
+        const flicker = 0.5 + 0.5*Math.sin(t*13) * Math.sin(t*7.1+1.7) * Math.sin(t*3.9+3.1);
+        const alpha = (0.15 + flicker*0.35) * proximity;
+        ctx.fillStyle='rgba(0,0,0,'+alpha.toFixed(3)+')'; ctx.fillRect(0,0,W,H);
+      }
+    }
 
     if(panicEl.classList.contains('on')){
       const p=(Math.sin(performance.now()/120)+1)/2;
@@ -1117,15 +1189,29 @@ if(hitVal==='#'||hitVal==='C'||hitVal==='D') break;
       ctx.fillStyle='#000';
       ctx.beginPath(); ctx.arc(cx-R*0.4, cy-R*0.06, R*0.05, 0, Math.PI*2); ctx.fill();
       ctx.beginPath(); ctx.arc(cx+R*0.4, cy-R*0.06, R*0.05, 0, Math.PI*2); ctx.fill();
-      // открытый рот
-      ctx.fillStyle='#2a0505';
-      ctx.beginPath(); ctx.ellipse(cx, cy+R*0.45, R*0.5, R*(0.2+0.25*(1-k)), 0, 0, Math.PI*2); ctx.fill();
-      // зубы
-      ctx.fillStyle='#fff';
-      ctx.fillRect(cx-R*0.4, cy+R*0.28, R*0.12, R*0.12);
-      ctx.fillRect(cx-R*0.15, cy+R*0.28, R*0.12, R*0.12);
-      ctx.fillRect(cx+R*0.1, cy+R*0.28, R*0.12, R*0.12);
-      ctx.fillRect(cx+R*0.32, cy+R*0.28, R*0.12, R*0.12);
+      // открытый рот — разный для каждого варианта
+      const sv = scareVariant % 4;
+      if(sv===0){
+        ctx.fillStyle='#2a0505';
+        ctx.beginPath(); ctx.ellipse(cx, cy+R*0.45, R*0.5, R*(0.2+0.25*(1-k)), 0, 0, Math.PI*2); ctx.fill();
+      } else if(sv===1){
+        ctx.fillStyle='#2a0505';
+        ctx.beginPath(); ctx.ellipse(cx, cy+R*0.5, R*0.5, R*0.55, 0, 0, Math.PI*2); ctx.fill(); // огромная пасть
+      } else if(sv===2){
+        ctx.fillStyle='#2a0505';
+        ctx.beginPath(); ctx.ellipse(cx, cy+R*0.4, R*0.18, R*(0.5+0.2*(1-k)), 0, 0, Math.PI*2); ctx.fill(); // узкий визг
+      } else {
+        ctx.fillStyle='#2a0505';
+        ctx.beginPath(); ctx.ellipse(cx, cy-R*0.05, R*0.55, R*0.7, 0, 0, Math.PI*2); ctx.fill(); // выпученная пасть с поднятым подбородком
+      }
+      // зубы — только если рот широкий
+      if(sv!==2){
+        ctx.fillStyle='#fff';
+        ctx.fillRect(cx-R*0.4, cy+R*0.28, R*0.12, R*0.12);
+        ctx.fillRect(cx-R*0.15, cy+R*0.28, R*0.12, R*0.12);
+        ctx.fillRect(cx+R*0.1, cy+R*0.28, R*0.12, R*0.12);
+        ctx.fillRect(cx+R*0.32, cy+R*0.28, R*0.12, R*0.12);
+      }
       ctx.restore();
     }
     if(shutter>0){ ctx.fillStyle='rgba(0,0,0,'+Math.min(1,shutter)+')'; ctx.fillRect(0,0,W,H); }
