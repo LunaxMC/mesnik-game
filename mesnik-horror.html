@@ -1574,29 +1574,6 @@ if(hitVal==='#'||hitVal==='C'||hitVal==='D') break;
       ctx.restore();
     }
     if(shutter>0){ ctx.fillStyle='rgba(0,0,0,'+Math.min(1,shutter)+')'; ctx.fillRect(0,0,W,H); }
-    // РУКИ ИГРОКА: оранжевый комбинезон с тёмными перчатками (HUD, внизу экрана)
-    if(state==='playing'||state==='dying'){
-      const hwR = Math.min(W*0.38, H*0.42);
-      const hx = W - hwR*0.8;         // правая рука
-      const hy = H - hwR*0.45;
-      const hy2 = H - hwR*0.38;
-      // правая перчатка (оранжевый рукав)
-      const rGrad = ctx.createLinearGradient(hx-hwR*0.4, hy, hx, hy+hwR*0.9);
-      rGrad.addColorStop(0,'#ff7a1a'); rGrad.addColorStop(1,'#c95a0a');
-      ctx.fillStyle=rGrad;
-      ctx.beginPath(); ctx.moveTo(hx-hwR*0.5, hy); ctx.quadraticCurveTo(hx-hwR*0.7, hy+hwR*0.45, hx-hwR*0.25, hy+hwR*0.95); ctx.lineTo(hx-hwR*0.02, hy+hwR*0.85); ctx.quadraticCurveTo(hx+hwR*0.15, hy+hwR*0.4, hx+hwR*0.05, hy-hwR*0.05); ctx.closePath(); ctx.fill();
-      // тёмная перчатка-кисть
-      ctx.fillStyle='#1a1a1a';
-      ctx.beginPath(); ctx.ellipse(hx-hwR*0.14, hy+hwR*0.8, hwR*0.2, hwR*0.16, -0.2, 0, Math.PI*2); ctx.fill();
-      // левая рука (чуть ниже, симметрично слева)
-      const lx = hwR*0.7;
-      const lGrad = ctx.createLinearGradient(lx-hwR*0.4, hy, lx, hy+hwR*0.9);
-      lGrad.addColorStop(0,'#ff7a1a'); lGrad.addColorStop(1,'#c95a0a');
-      ctx.fillStyle=lGrad;
-      ctx.beginPath(); ctx.moveTo(lx-hwR*0.2, hy-hwR*0.05); ctx.quadraticCurveTo(lx+hwR*0.1, hy+hwR*0.2, lx-hwR*0.05, hy+hwR*0.85); ctx.lineTo(lx+hwR*0.3, hy+hwR*0.95); ctx.quadraticCurveTo(lx+hwR*0.45, hy+hwR*0.5, lx+hwR*0.3, hy-hwR*0.15); ctx.closePath(); ctx.fill();
-      ctx.fillStyle='#1a1a1a';
-      ctx.beginPath(); ctx.ellipse(lx+hwR*0.12, hy+hwR*0.8, hwR*0.2, hwR*0.16, 0.2, 0, Math.PI*2); ctx.fill();
-    }
   }
 
   function updateHUD(){
