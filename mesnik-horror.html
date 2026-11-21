@@ -610,16 +610,20 @@
       const t0 = ac.currentTime;
       const v = variant || 0;
       const mul = gainMul || 1;
-      // шумовой удар
+      // мастер-выход с компрессором, чтобы на предельной громкости не было жёсткого клиппинга
+      let master = ac.createDynamicsCompressor();
+      master.threshold.value = -16; master.knee.value = 6; master.ratio.value = 18; master.attack.value = 0.002; master.release.value = 0.18;
+      master.connect(ac.destination);
+      // шумовой удар — НА МАКСИМУМ
       const dur = 0.5;
       const buf = ac.createBuffer(1, Math.floor(ac.sampleRate*dur), ac.sampleRate);
       const data = buf.getChannelData(0);
       for(let i=0;i<data.length;i++){ data[i] = (Math.random()*2-1) * Math.exp(-3*i/data.length); }
       const src = ac.createBufferSource(); src.buffer=buf;
-      const g = ac.createGain(); g.gain.value = 0.5*mul;
-      src.connect(g); g.connect(ac.destination); src.start(t0);
-      const og=ac.createGain(); og.gain.setValueAtTime(0.4*mul,t0); og.gain.exponentialRampToValueAtTime(0.001,t0+0.6);
-      og.connect(ac.destination);
+      const g = ac.createGain(); g.gain.value = 1.0*mul;
+      src.connect(g); g.connect(master); src.start(t0);
+      const og=ac.createGain(); og.gain.setValueAtTime(1.0*mul,t0); og.gain.exponentialRampToValueAtTime(0.001,t0+0.6);
+      og.connect(master);
       // разные диссонансные «крики»
       const o1=ac.createOscillator(), o2=ac.createOscillator();
       const variants=[
