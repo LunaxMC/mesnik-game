@@ -152,9 +152,10 @@
   function insideMap(tx,ty){ return tx>=0 && ty>=0 && tx<COLS && ty<ROWS; }
   function isWall(tx,ty){ return !insideMap(tx,ty) || MAP[ty][tx]==='#'; }
   function isCloset(tx,ty){ return insideMap(tx,ty) && MAP[ty][tx]==='C'; }
-  function isDoor(tx,ty){ return insideMap(tx,ty) && MAP[ty][tx]==='D'; }
+  function isDoor(tx,ty){ return insideMap(tx,ty) && (MAP[ty][tx]==='D'||MAP[ty][tx]==='O'); }
+  function isDoorClosed(tx,ty){ return insideMap(tx,ty) && MAP[ty][tx]==='D'; }
   function isBlocking(tx,ty){
-    return isWall(tx,ty) || isDoor(tx,ty) || (isCloset(tx,ty) && !(player && player.inCloset && player.inCloset.ty===ty && player.inCloset.tx===tx));
+    return isWall(tx,ty) || isDoorClosed(tx,ty) || (isCloset(tx,ty) && !(player && player.inCloset && player.inCloset.ty===ty && player.inCloset.tx===tx));
   }
 
   // ---- ПРОЧНОСТЬ И ЛОМКА ----
@@ -276,7 +277,7 @@
       const tx=Math.floor(px), ty=Math.floor(py);
       if(isWall(tx,ty)) return false;
       if(isCloset(tx,ty)) return false;
-      if(isDoor(tx,ty)) return false;
+      if(isDoorClosed(tx,ty)) return false;
     }
     return true;
   }
@@ -589,8 +590,8 @@
         else { sideDistY+=deltaDistY; hit.ty+=stepY; side=1; }
         if(hit.tx<0||hit.ty<0||hit.tx>=COLS||hit.ty>=ROWS) break;
         hitVal=MAP[hit.ty][hit.tx];
-        if(hitVal==='#'||hitVal==='C'||hitVal==='D') break;
-        d++;
+if(hitVal==='#'||hitVal==='C'||hitVal==='D') break;
+      d++;
       }
       if(side===0) perpWDist = sideDistX - deltaDistX;
       else perpWDist = sideDistY - deltaDistY;
