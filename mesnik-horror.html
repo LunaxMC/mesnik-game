@@ -94,6 +94,7 @@
   ];
   const COLS = MAP[0].length, ROWS = MAP.length;
   const MW = COLS*TILE, MH = ROWS*TILE;
+  const MAP_ORIGINAL = MAP.map(r => r.slice()); // эталон: чтобы восстанавливать блоки
 
   function insideMap(tx,ty){ return tx>=0 && ty>=0 && tx<COLS && ty<ROWS; }
   function isWall(tx,ty){ return !insideMap(tx,ty) || MAP[ty][tx]===1; }
@@ -127,7 +128,10 @@
     if (damage[k]>=hp){ MAP[ty][tx]=0; delete damage[k]; return true; }
     return false;
   }
-  function resetTiles(){ for(const k in damage) delete damage[k]; }
+  function resetTiles(){
+    for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++) MAP[y][x] = MAP_ORIGINAL[y][x];
+    for(const k in damage) delete damage[k];
+  }
 
   const player = { x:TILE*2+20, y:TILE*7+20, r:12, speed:200, runMult:1.7, inCloset:null };
   const butcher = { x:TILE*13+20, y:TILE*12+20, r:16, speed:118, chaseSpeed:150, catchDist:22, viewDist:300, heardCooldown:0, lastSeen:null, chaseTimer:0, axeTimer:0, axeTarget:null, axeTrail:0, axeDir:0 };
