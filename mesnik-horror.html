@@ -35,6 +35,10 @@
   .overlay-actions button:hover { background: #600002; }
   .overlay-actions .ghost { background: transparent; border-color: #666; color: #bbb; }
   .overlay-actions .ghost:hover { border-color: #aaa; color: #fff; }
+  .nick-row { margin: 10px 0 4px; font-family: inherit; font-size: 14px; color: #ddd; }
+  .nick-row label { letter-spacing: 2px; }
+  #nickInput { background: #0e0e0e; color: #ffd27a; border: 1px solid #ff2a2a; padding: 8px 12px; font-size: 16px; font-family: inherit; letter-spacing: 1px; width: 220px; text-align: center; margin-left: 6px; outline: none; }
+  #nickInput:focus { border-color: #ffd27a; }
 </style>
 </head>
 <body>
@@ -90,13 +94,20 @@
   // ---- КАРТА: большая бойня, сгенерированная процедурно ----
   // # стена, . пол, C шкаф, D дверь (открывается/закрывается), T сундук с лутом, P спавн игрока, B спавн мясника
   // Генератор создаёт большой dungeon (~132x156, >>10x от прежних 47x47): комнаты, L-коридоры, двери в комнатах.
-  const COLS_G=132, ROWS_G=156;
-  function genMap(){
+  // ---- КАРТЫ: несколько пресетов с разной структурой ----
+  const MAP_PRESETS = [
+    { name:'БОЙНЯ',   cols:132, rows:156, colsPerRoom:9, rowsPerRoom:9, gap:4, extraDoors:false }, // классическая большая
+    { name:'ПАУТИНА', cols:120, rows:120, colsPerRoom:7, rowsPerRoom:7, gap:3, extraDoors:true  }, // узкие коридоры, больше дверей
+    { name:'ОТКРЫТЫЙ',cols:150, rows:110, colsPerRoom:12,rowsPerRoom:9, gap:6, extraDoors:false }, // широкие залы
+  ];
+  let COLS_G=132, ROWS_G=156, _rooms=[], MAP=[];
+  function gAt(x,y){ return y<0||x<0||y>=ROWS_G||x>=COLS_G ? '#' : MAP[y][x]; }
+  function genMap(preset){
+    COLS_G=preset.cols; ROWS_G=preset.rows;
     const g=Array.from({length:ROWS_G},()=>Array(COLS_G).fill('#'));
-    const RW=9, RH=9, GAP=4, S=2;
+    const RW=preset.colsPerRoom, RH=preset.rowsPerRoom, GAP=preset.gap, S=2;
     const rooms=[];
     function carve(x0,y0,w,h){ for(let y=y0;y<y0+h;y++) for(let x=x0;x<x0+w;x++) g[y][x]='.'; }
-    // комнаты на равномерной сетке (сохраняем центры для соединения)
     let xs=[];
     for(let x=S; x+RW<COLS_G-2; x+=RW+GAP) xs.push(x+Math.floor(RW/2));
     let ys=[];
@@ -104,16 +115,17 @@
     for(let iy=0; iy<ys.length; iy++){
       for(let ix=0; ix<xs.length; ix++){
         const cx=xs[ix], cy=ys[iy];
-        carve(cx-4, cy-4, RW, RH);
+        carve(cx-Math.floor(RW/2), cy-Math.floor(RH/2), RW, RH);
         rooms.push({cx,cy});
       }
     }
-    // L-коридоры: соединяем каждую комнату с соседом слева и сверху
+    // хаотичные L-коридоры: каждая комната соединена со случайным соседом (сеть сложнее)
     function corridor(x1,y1,x2,y2){
       let x=x1, y=y1;
-      while(x!==x2){ g[y][x]='.'; x+=Math.sign(x2-x); }
-      while(y!==y2){ g[y][x]='.'; y+=Math.sign(y2-y); }
-      g[y][x]='.';
+      const firstHoriz = Math.random()<0.5;
+      if(firstHoriz){ while(x!==x2){ if(g[y]&&g[y][x]!=='@') g[y][x]='.'; x+=Math.sign(x2-x); } while(y!==y2){ if(g[y]&&g[y][x]!=='@') g[y][x]='.'; y+=Math.sign(y2-y); } }
+      else { while(y!==y2){ if(g[y]&&g[y][x]!=='@') g[y][x]='.'; y+=Math.sign(y2-y); } while(x!==x2){ if(g[y]&&g[y][x]!=='@') g[y][x]='.'; x+=Math.sign(x2-x); } }
+      if(g[y]&&g[y][x]!=='@') g[y][x]='.';
     }
     function idx(ix,iy){ return iy*xs.length+ix; }
     for(let iy=0; iy<ys.length; iy++){
@@ -121,40 +133,50 @@
         const c=rooms[idx(ix,iy)];
         if(ix>0){ const l=rooms[idx(ix-1,iy)]; corridor(c.cx,c.cy,l.cx,l.cy); }
         if(iy>0){ const u=rooms[idx(ix,iy-1)]; corridor(c.cx,c.cy,u.cx,u.cy); }
+        if(preset.extraDoors && Math.random()<0.6){ // случайные доп.проходы в сложных картах
+          const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+          const d=dirs[Math.floor(Math.random()*4)];
+          corridor(c.cx,c.cy,c.cx+d[0]*10, c.cy+d[1]*10);
+        }
       }
     }
     return {g, rooms};
   }
-  const _gen = genMap();
-  const MAP = _gen.g;
-  const _rooms = _gen.rooms;
-  // Двери: у каждой комнаты ставим дверь 'D' в стене в сторону ближайшего соседнего коридора/комнаты,
-  // кладём сундук и шкаф; в углы карты — спавны игрока (P) и мясника (B).
+  // Генерация активной карты
+  let activeMapIdx = 0;
+  function buildMap(idx){
+    activeMapIdx = ((idx % MAP_PRESETS.length)+MAP_PRESETS.length)%MAP_PRESETS.length;
+    const preset = MAP_PRESETS[activeMapIdx];
+    const gen = genMap(preset);
+    MAP = gen.g; _rooms = gen.rooms;
+    decorateRooms();
+    TEMPLATE = MAP.map(r=>r.slice());
+    if(typeof resetTiles==='function') resetTiles();
+  }
+  // Двери: у каждой комнаты ставим дверь 'D' в стене, кладём сундук и шкаф; спавны P и B по углам.
   function decorateRooms(){
     for(let i=0;i<_rooms.length;i++){
       const rm=_rooms[i];
       let placed=false;
       const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
-      // перемешаем порядок направлений
       for(let k=dirs.length-1;k>0;k--){ const j=Math.floor(Math.random()*(k+1)); [dirs[k],dirs[j]]=[dirs[j],dirs[k]]; }
       for(const [dx,dy] of dirs){
-        const px=rm.cx+dx*4, py=rm.cy+dy*4; // стена комнаты в направлении
-        const ox=px+dx, oy=py+dy;           // клетка снаружи (коридор/другая комната)
-        if(gAt(ox,oy)==='.'){ MAP[py][px]='D'; placed=true; break; }
+        const px=rm.cx+dx*4, py=rm.cy+dy*4;
+        const ox=px+dx, oy=py+dy;
+        if(insideMap(ox,oy) && gAt(ox,oy)==='.'){ MAP[py][px]='D'; placed=true; break; }
       }
       if(!placed) MAP[rm.cy+4][rm.cx]='D';
-      // лут в комнате
       MAP[rm.cy-3][rm.cx-3]='T';
       MAP[rm.cy+3][rm.cx+3]= Math.random()<0.5?'C':'T';
     }
-    // спавн игрока: в первой комнате, мясника — в углу самой дальней комнаты
     const first=_rooms[0], last=_rooms[_rooms.length-1];
     MAP[first.cy][first.cx]='P';
     MAP[last.cy][last.cx]='B';
   }
-  function gAt(x,y){ return y<0||x<0||y>=ROWS_G||x>=COLS_G ? '#' : MAP[y][x]; }
-  decorateRooms();
-  const COLS = MAP[0].length, ROWS = MAP.length;
+  // первичная генерация карты (чтобы MAP и COLS/ROWS были валидны до старта)
+  let _tmpGen = genMap(MAP_PRESETS[0]);
+  MAP = _tmpGen.g; _rooms = _tmpGen.rooms;
+  let COLS = MAP[0].length, ROWS = MAP.length;
 
   function insideMap(tx,ty){ return tx>=0 && ty>=0 && tx<COLS && ty<ROWS; }
   function isWall(tx,ty){ return !insideMap(tx,ty) || MAP[ty][tx]==='#'; }
@@ -195,6 +217,7 @@
     medium:  { name:'СРЕДНИЙ',   time:210,  speed:1.0, chaseMult:1.15, viewDist:1.15, wallHits:2, knows:false, touch:false, canHear:true },
     hard:    { name:'СЛОЖНЫЙ',   time:210,  speed:1.5, chaseMult:1.3, viewDist:1.3,  wallHits:1, knows:true,  touch:false, canHear:true },
     god:     { name:'СТАРЫЙ БОГ', time:210,  speed:2.2, chaseMult:1.5, viewDist:2,    wallHits:0, knows:true, touch:true,  canHear:true },
+    pvp:     { name:'1V1', time:210, speed:1.6, chaseMult:1, viewDist:99, wallHits:0, knows:true, touch:true, canHear:false, ai:false },
   };
 
   // ---- СПАВН в комнате (пустой пол, не дверь, не стена) ----
@@ -490,10 +513,13 @@
     const serumBoost = serumTimer>0 ? 1.45 : 1;
     const spd = player.speed*(run?player.runMult:1)*(godMode?1.5:1)*serumBoost;
     let mx=0, my=0;
-    if(keys['KeyW']||keys['ArrowUp']) mx += player.dirX, my += player.dirY;
-    if(keys['KeyS']||keys['ArrowDown']) mx -= player.dirX, my -= player.dirY;
-    if(keys['KeyD']||keys['ArrowRight']){ /* strafe right */ const px=-player.dirY, py=player.dirX; mx+=px; my+=py; }
-    if(keys['KeyA']||keys['ArrowLeft']){ const px=-player.dirY, py=player.dirX; mx-=px; my-=py; }
+    const isPvP = currentMode && currentMode.name==='1V1';
+    // в 1v1 выживший идёт только на WASD (стрелки — за мясника)
+    if(keys['KeyW'] || (!isPvP && keys['ArrowUp'])) mx += player.dirX, my += player.dirY;
+    if(keys['KeyS'] || (!isPvP && keys['ArrowDown'])) mx -= player.dirX, my -= player.dirY;
+    if(keys['KeyD'] || (!isPvP && keys['ArrowRight'])){ const px=-player.dirY, py=player.dirX; mx+=px; my+=py; }
+    if(keys['KeyA'] || (!isPvP && keys['ArrowLeft'])){ const px=-player.dirY, py=player.dirX; mx-=px; my-=py; }
+    let isMoving = false;
     if(mx||my){
       const len=Math.hypot(mx,my)||1; mx/=len; my/=len;
       const pr = godMode?0.4:0.25;
@@ -535,6 +561,20 @@
 
     if(butcher.axeTimer>0){
       // удар
+    } else if(currentMode.name==='1V1'){
+      // РЕЖИМ 1v1: мясником управляют стрелки
+      let bmx=0, bmy=0;
+      if(keys['ArrowUp']) bmy-=1;
+      if(keys['ArrowDown']) bmy+=1;
+      if(keys['ArrowRight']) bmx+=1;
+      if(keys['ArrowLeft']) bmx-=1;
+      if(bmx||bmy){
+        butcher.ang = Math.atan2(bmy, bmx);
+        moveButcher(butcher.ang, butcher.speed, dt, false);
+      }
+      if(keys['KeyN']) { // N — удар ножом (атака)
+        knockPlayer();
+      }
     } else if(currentMode.knows){
       const ang=Math.atan2(player.y-butcher.y, player.x-butcher.x);
       moveButcher(ang, butcher.speed*currentMode.chaseMult, dt, false);
@@ -552,7 +592,7 @@
       moveButcher(butcher.ang, butcher.speed*0.5, dt, true);
     }
 
-    if(!player.inCloset && dToPlayer<butcher.catchDist && (currentMode.knows||playerVisible) && !clubStun) startDeath();
+    if(!player.inCloset && dToPlayer<butcher.catchDist && (currentMode.knows||playerVisible) && !clubStun && currentMode.name!=='1V1') startDeath();
     if(!currentMode.knows && player.inCloset && dToPlayer<0.5) startDeath();
 
     // таймеры предметов
@@ -730,6 +770,21 @@
   }
 
   function startDeath(){ state='dying'; deathT=0; deathPhase=0; scareActive=0.9; scareVariant=Math.floor(Math.random()*4); playScareSound(scareVariant, 1.5); }
+
+  // АТАКА ИГРОКА-МЯСНИКА (режим 1v1): нож вблизи убивает, дальше — толчок/оглушение
+  function knockPlayer(){
+    const d = dist(player.x, player.y, butcher.x, butcher.y);
+    if(!player.inCloset && d < butcher.catchDist*1.6){
+      startDeath();
+    } else if(!player.inCloset && d < 2.2){
+      // сильный толчок выжившего назад
+      const ang = Math.atan2(player.y-butcher.y, player.x-butcher.x);
+      let nx=player.x+Math.cos(ang)*0.8, ny=player.y+Math.sin(ang)*0.8;
+      if(!circleHitsWall(nx,ny,0.25)){ player.x=nx; player.y=ny; }
+      player.inCloset=null;
+      flashMsg('МЯСНИК ТОЛКНУЛ ТЕБЯ!');
+    }
+  }
   function die(){ state='dead'; showOverlay('dead'); }
   function win(){ state='win'; showOverlay('win'); }
 
@@ -818,6 +873,8 @@
   }
 
   let difficultyKey='easy';
+  let playerNick = (localStorage.getItem('msn_nick')||'').trim().slice(0,16);
+  if(!playerNick) playerNick = 'Игрок';
   function showMenu(){
     state='menu';
     stopAmbientDrone();
@@ -826,17 +883,30 @@
     overlay.innerHTML =
       '<h1>МЯСНИК</h1>'+
       '<div class="sub">Ты спрятался в заброшенной бойне. Продержись до приезда спецназа. Выбери режим.</div>'+
+      '<div class="nick-row"><label>ТВОЙ НИК: </label><input id="nickInput" maxlength="16" value="'+playerNick+'"></div>'+
+      '<div class="nick-row"><label>КАРТА: </label><select id="mapSelect">'+
+        MAP_PRESETS.map((p,i)=>'<option value="'+i+'"'+(i===activeMapIdx?' selected':'')+'>'+p.name+'</option>').join('')+
+      '</select></div>'+
       '<div class="diff-title">— ВЫБЕРИ СЛОЖНОСТЬ —</div>'+
       '<div class="diff-panel" id="diffPanel">'+
-        '<button class="diff-btn" data-d="peaceful"><span class="d-label">МИРНЫЙ</span><span class="d-desc">Не ломает стены, не знает где ты. Неторопливый.</span><span class="d-time">3.5 мин</span></button>'+
-        '<button class="diff-btn" data-d="easy"><span class="d-label">ЛЁГКИЙ</span><span class="d-desc">Ломает стены и шкафы за 4 удара. Бежит, когда видит тебя.</span><span class="d-time">3.5 мин</span></button>'+
-        '<button class="diff-btn" data-d="medium"><span class="d-label">СРЕДНИЙ</span><span class="d-desc">В 2.5 раза быстрее. Ломает за 2 удара.</span><span class="d-time">3.5 мин</span></button>'+
-        '<button class="diff-btn" data-d="hard"><span class="d-label">СЛОЖНЫЙ</span><span class="d-desc">В 5 раз быстрее. Ломает за 1 удар. Всегда знает где ты.</span><span class="d-time">3.5 мин</span></button>'+
-        '<button class="diff-btn" data-d="god"><span class="d-label">СТАРЫЙ БОГ</span><span class="d-desc">В 11 раз быстрее. Знает всё. Ломает при касании.</span><span class="d-time">3.5 мин</span></button>'+
+        '<button class="diff-btn" data-d="peaceful"><span class="d-label">МИРНЫЙ</span><span class="d-desc">ИИ-мясник, неторопливый. Не ломает стены.</span><span class="d-time">3.5 мин</span></button>'+
+        '<button class="diff-btn" data-d="easy"><span class="d-label">ЛЁГКИЙ</span><span class="d-desc">ИИ-мясник. Ломает за 4 удара, бежит при виде.</span><span class="d-time">3.5 мин</span></button>'+
+        '<button class="diff-btn" data-d="medium"><span class="d-label">СРЕДНИЙ</span><span class="d-desc">ИИ-мясник. В 2.5 раза быстрее.</span><span class="d-time">3.5 мин</span></button>'+
+        '<button class="diff-btn" data-d="hard"><span class="d-label">СЛОЖНЫЙ</span><span class="d-desc">ИИ-мясник. Быстрее, всегда знает где ты.</span><span class="d-time">3.5 мин</span></button>'+
+        '<button class="diff-btn" data-d="pvp"><span class="d-label">1v1 ИГРОК-МЯСНИК</span><span class="d-desc">Ты и мясник на одной клавиатуре. WASD — ты, стрелки — мясник.</span><span class="d-time">3.5 мин</span></button>'+
       '</div>'+
-      '<div class="foot" style="color:#bbb;margin-top:14px;"><b>МЫШЬ</b> — осмотреться · <b>W A S D</b> / <b>стрелки</b> — движение · <b>Shift</b> — бег · <b>E</b> — открыть/закрыть дверь, прятаться в шкаф · <b>F</b> — полноэкранный режим</div>';
+      '<div class="foot" style="color:#bbb;margin-top:14px;"><b>МЫШЬ</b> — осмотреться · <b>W A S D</b> / <b>стрелки</b> — движение · <b>Shift</b> — бег · <b>E</b> — открыть/закрыть дверь, спрятаться в шкаф · <b>F</b> — полноэкранный режим</div>';
+    const nickInput = document.getElementById('nickInput');
+    nickInput.addEventListener('input', ()=>{
+      playerNick = nickInput.value.trim().slice(0,16) || 'Игрок';
+      localStorage.setItem('msn_nick', playerNick);
+    });
     overlay.querySelectorAll('.diff-btn').forEach(b=>b.addEventListener('click', ()=>{
       difficultyKey=b.dataset.d;
+      if(nickInput) playerNick = (nickInput.value.trim().slice(0,16))||'Игрок';
+      localStorage.setItem('msn_nick', playerNick);
+      const mapSel = document.getElementById('mapSelect');
+      if(mapSel) buildMap(parseInt(mapSel.value,10));
       applyMode(difficultyKey);
       resetGame(true);
       startAmbientDrone();
@@ -1327,6 +1397,29 @@ if(hitVal==='#'||hitVal==='C'||hitVal==='D') break;
       ctx.restore();
     }
     if(shutter>0){ ctx.fillStyle='rgba(0,0,0,'+Math.min(1,shutter)+')'; ctx.fillRect(0,0,W,H); }
+    // РУКИ ИГРОКА: оранжевый комбинезон с тёмными перчатками (HUD, внизу экрана)
+    if(state==='playing'||state==='dying'){
+      const hwR = Math.min(W*0.38, H*0.42);
+      const hx = W - hwR*0.8;         // правая рука
+      const hy = H - hwR*0.45;
+      const hy2 = H - hwR*0.38;
+      // правая перчатка (оранжевый рукав)
+      const rGrad = ctx.createLinearGradient(hx-hwR*0.4, hy, hx, hy+hwR*0.9);
+      rGrad.addColorStop(0,'#ff7a1a'); rGrad.addColorStop(1,'#c95a0a');
+      ctx.fillStyle=rGrad;
+      ctx.beginPath(); ctx.moveTo(hx-hwR*0.5, hy); ctx.quadraticCurveTo(hx-hwR*0.7, hy+hwR*0.45, hx-hwR*0.25, hy+hwR*0.95); ctx.lineTo(hx-hwR*0.02, hy+hwR*0.85); ctx.quadraticCurveTo(hx+hwR*0.15, hy+hwR*0.4, hx+hwR*0.05, hy-hwR*0.05); ctx.closePath(); ctx.fill();
+      // тёмная перчатка-кисть
+      ctx.fillStyle='#1a1a1a';
+      ctx.beginPath(); ctx.ellipse(hx-hwR*0.14, hy+hwR*0.8, hwR*0.2, hwR*0.16, -0.2, 0, Math.PI*2); ctx.fill();
+      // левая рука (чуть ниже, симметрично слева)
+      const lx = hwR*0.7;
+      const lGrad = ctx.createLinearGradient(lx-hwR*0.4, hy, lx, hy+hwR*0.9);
+      lGrad.addColorStop(0,'#ff7a1a'); lGrad.addColorStop(1,'#c95a0a');
+      ctx.fillStyle=lGrad;
+      ctx.beginPath(); ctx.moveTo(lx-hwR*0.2, hy-hwR*0.05); ctx.quadraticCurveTo(lx+hwR*0.1, hy+hwR*0.2, lx-hwR*0.05, hy+hwR*0.85); ctx.lineTo(lx+hwR*0.3, hy+hwR*0.95); ctx.quadraticCurveTo(lx+hwR*0.45, hy+hwR*0.5, lx+hwR*0.3, hy-hwR*0.15); ctx.closePath(); ctx.fill();
+      ctx.fillStyle='#1a1a1a';
+      ctx.beginPath(); ctx.ellipse(lx+hwR*0.12, hy+hwR*0.8, hwR*0.2, hwR*0.16, 0.2, 0, Math.PI*2); ctx.fill();
+    }
   }
 
   function updateHUD(){
