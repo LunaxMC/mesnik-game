@@ -290,6 +290,9 @@
   let scaryTimer = 0;      // время до следующего возможного скримера
   let scaryActive = 0;     // длительность вспышки скримера
 
+  // камера: false — от первого лица, true — от второго (P)
+  let secondPerson = false;
+
   // ---- МУЛЬТИПЛЕЕР (PeerJS / WebRTC) ----
   let peer = null;
   let peerConn = null;              // активное P2P-соединение
@@ -392,6 +395,7 @@
     if(e.code==='Shift') e.preventDefault();
     if(e.code==='KeyT' && state==='playing' && !godMode) activateGod();
     if(e.code==='KeyF') toggleFullscreen();
+    if(e.code==='KeyP' && state==='playing'){ secondPerson=!secondPerson; flashMsg(secondPerson?'Камера: от 2-го лица': 'Камера: от 1-го лица'); }
   });
   document.addEventListener('keyup', e => { keys[e.code]=false; });
 
@@ -1376,6 +1380,42 @@ if(hitVal==='#'||hitVal==='C'||hitVal==='D') break;
     ctx.fillStyle='rgba(0,0,0,0.5)';
     ctx.beginPath(); ctx.ellipse(cx, bodyY+rad*1.6, rad*0.8, rad*0.2, 0, 0, Math.PI*2); ctx.fill();
     ctx.restore();
+
+    // === СВОЯ ФИГУРА (камера от 2-го лица): как бы своим телом видишь персонажа внизу по центру ===
+    if(secondPerson && (state==='playing'||state==='dying')){
+      const fw = Math.min(W*0.30, H*0.34);
+      const fx = W/2, fbase = H - fw*0.12;
+      // тень
+      ctx.fillStyle='rgba(0,0,0,0.5)';
+      ctx.beginPath(); ctx.ellipse(fx, fbase, fw*0.5, fw*0.14, 0, 0, Math.PI*2); ctx.fill();
+      // ноги/ботинки
+      ctx.fillStyle='#20242a';
+      ctx.beginPath(); ctx.ellipse(fx-fw*0.14, fbase-fw*0.10, fw*0.12, fw*0.08, 0, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(fx+fw*0.14, fbase-fw*0.10, fw*0.12, fw*0.08, 0, 0, Math.PI*2); ctx.fill();
+      // оранжевый комбинезон (торс)
+      const og = ctx.createLinearGradient(fx-fw, fbase-fw*0.9, fx+fw, fbase);
+      og.addColorStop(0,'#ff9a2a'); og.addColorStop(1,'#d96a10');
+      ctx.fillStyle=og;
+      ctx.beginPath();
+      ctx.moveTo(fx-fw*0.28, fbase-fw*0.85);
+      ctx.quadraticCurveTo(fx, fbase-fw*1.05, fx+fw*0.28, fbase-fw*0.85);
+      ctx.lineTo(fx+fw*0.34, fbase-fw*0.05);
+      ctx.lineTo(fx-fw*0.34, fbase-fw*0.05);
+      ctx.closePath(); ctx.fill();
+      // шлем с визором
+      const hg = ctx.createLinearGradient(fx-fw*0.16, fbase-fw*1.05, fx+fw*0.16, fbase-fw*0.65);
+      hg.addColorStop(0,'#3a4148'); hg.addColorStop(1,'#1b1e22');
+      ctx.fillStyle=hg;
+      ctx.beginPath(); ctx.arc(fx, fbase-fw*0.85, fw*0.2, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle='#0b0d10';
+      ctx.beginPath(); ctx.ellipse(fx, fbase-fw*0.85, fw*0.15, fw*0.075, 0, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,0.18)';
+      ctx.beginPath(); ctx.ellipse(fx-fw*0.05, fbase-fw*0.87, fw*0.06, fw*0.025, 0, 0, Math.PI*2); ctx.fill();
+      // перчатки по бокам (как держит руки вниз)
+      ctx.fillStyle='#1a1d20';
+      ctx.beginPath(); ctx.arc(fx-fw*0.33, fbase-fw*0.2, fw*0.06, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(fx+fw*0.33, fbase-fw*0.2, fw*0.06, 0, Math.PI*2); ctx.fill();
+    }
 
     // === УДАЛЁННЫЙ ИГРОК (мультиплеер): оранжевый комбинезон, шлем, визор ===
     if(remotePlayer && remotePlayer.alive!==false){
