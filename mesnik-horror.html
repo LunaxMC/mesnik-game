@@ -55,7 +55,7 @@
   <div class="sub">Ты спрятался в заброшенной бойне. Продержись до приезда спецназа. Выбери режим.</div>
   <div class="diff-title">— ВЫБЕРИ СЛОЖНОСТЬ —</div>
   <div class="diff-panel" id="diffPanel"></div>
-  <div class="foot" style="color:#bbb;margin-top:14px;"><b>МЫШЬ</b> — осмотреться · <b>W A S D</b> / <b>стрелки</b> — движение · <b>Shift</b> — бег · <b>E</b> — открыть/закрыть дверь, спрятаться в шкаф</div>
+  <div class="foot" style="color:#bbb;margin-top:14px;"><b>МЫШЬ</b> — осмотреться · <b>W A S D</b> / <b>стрелки</b> — движение · <b>Shift</b> — бег · <b>E</b> — открыть/закрыть дверь, спрятаться в шкаф · <b>F</b> — полноэкранный режим</div>
 </div>
 
 <script>
@@ -230,8 +230,17 @@
     if(e.code==='KeyE' && state==='playing' && !godMode) interactE();
     if(e.code==='Shift') e.preventDefault();
     if(e.code==='KeyT' && state==='playing' && !godMode) activateGod();
+    if(e.code==='KeyF') toggleFullscreen();
   });
   document.addEventListener('keyup', e => { keys[e.code]=false; });
+
+  // ---- ПОЛНОЭКРАННЫЙ РЕЖИМ (F) ----
+  function toggleFullscreen(){
+    try {
+      if(document.fullscreenElement) document.exitFullscreen();
+      else document.documentElement.requestFullscreen();
+    } catch(e){}
+  }
 
   // МЫШЬ: осмотр от первого лица
   let mouseLocked = state==='playing';
@@ -533,7 +542,7 @@
         '<button class="diff-btn" data-d="hard"><span class="d-label">СЛОЖНЫЙ</span><span class="d-desc">В 5 раз быстрее. Ломает за 1 удар. Всегда знает где ты.</span><span class="d-time">45с</span></button>'+
         '<button class="diff-btn" data-d="god"><span class="d-label">СТАРЫЙ БОГ</span><span class="d-desc">В 11 раз быстрее. Знает всё. Ломает при касании.</span><span class="d-time">45с</span></button>'+
       '</div>'+
-      '<div class="foot" style="color:#bbb;margin-top:14px;"><b>МЫШЬ</b> — осмотреться · <b>W A S D</b> / <b>стрелки</b> — движение · <b>Shift</b> — бег · <b>E</b> — открыть/закрыть дверь, прятаться в шкаф</div>';
+      '<div class="foot" style="color:#bbb;margin-top:14px;"><b>МЫШЬ</b> — осмотреться · <b>W A S D</b> / <b>стрелки</b> — движение · <b>Shift</b> — бег · <b>E</b> — открыть/закрыть дверь, прятаться в шкаф · <b>F</b> — полноэкранный режим</div>';
     overlay.querySelectorAll('.diff-btn').forEach(b=>b.addEventListener('click', ()=>{
       difficultyKey=b.dataset.d;
       applyMode(difficultyKey);
