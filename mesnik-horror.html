@@ -237,11 +237,7 @@
     x: bs.tx + 0.5, y: bs.ty + 0.5,
     r: 0.25, speed: 0.7, catchDist: 0.6, viewDist: 0.9,
     heardCooldown:0, lastSeen:null, chaseTimer:0,
-    axeTimer:0, axeTarget:null, axeTrail:0, axeDir:0,
-    // исчезновение и телепорт
-    invisible:0,     // >0 — невидим (не рисуется)
-    teleTimer:4,     // счётчик до следующего исчезновения
-    teleTarget:false // скоро телепортируется за спину
+    axeTimer:0, axeTarget:null, axeTrail:0, axeDir:0
   };
   let currentMode = null;
   let timeLeft = 90;
@@ -255,7 +251,7 @@
   let serumTimer = 0;
   let clubCooldown = 0;
   // скример
-  let nextScare = 8;     // через сколько секунд возможен скример (случайно)
+  let nextScare = 15;     // через сколько секунд возможен первый скример
   let scareActive = 0;   // длительность скримера на экране
   let scareVariant = 0;  // вариант лица/звука скримера
   // скример
@@ -526,34 +522,6 @@
 
     panicEl.classList.toggle('on', (playerVisible && dToPlayer<butcher.viewDist));
 
-    // === ИСЧЕЗНОВЕНИЕ И ТЕЛЕПОРТ ===
-    if(butcher.invisible>0) butcher.invisible-=dt;
-    butcher.teleTimer-=dt;
-    if(butcher.teleTimer<=0 && !godMode && !player.inCloset && dToPlayer>1.2){
-      // исчезает
-      butcher.invisible=1.2;   // пропадает на ~1 сек
-      butcher.teleTimer = 12 + Math.random()*16; // раз в 12-28 сек
-      butcher.telePending = 0.8;
-    }
-    if(butcher.telePending>0){
-      butcher.telePending-=dt;
-      if(butcher.telePending<=0){
-        // телепорт перед игроком, но не в стену и не прямо лицом-в-лицо (на расстоянии)
-        const behind = 0.75; // ищем место впереди игрока
-        for(let tries=0;tries<8;tries++){
-          const ang = player.dirAngle + (Math.random()-0.5)*0.6;
-          const tx = Math.floor(player.x + Math.cos(ang)*behind*2);
-          const ty = Math.floor(player.y + Math.sin(ang)*behind*2);
-          if(insideMap(tx,ty) && !isBlocking(tx,ty)){
-            butcher.x=tx+0.5; butcher.y=ty+0.5;
-            butcher.invisible=0;
-            butcher.telePending=0;
-            break;
-          }
-        }
-      }
-    }
-
     if(butcher.axeTimer>0){
       // удар
     } else if(currentMode.knows){
@@ -573,7 +541,7 @@
       moveButcher(butcher.ang, butcher.speed*0.5, dt, true);
     }
 
-    if(butcher.invisible<=0 && !player.inCloset && dToPlayer<butcher.catchDist && (currentMode.knows||playerVisible) && !clubStun) startDeath();
+    if(!player.inCloset && dToPlayer<butcher.catchDist && (currentMode.knows||playerVisible) && !clubStun) startDeath();
     if(!currentMode.knows && player.inCloset && dToPlayer<0.5) startDeath();
 
     // таймеры предметов
@@ -587,8 +555,14 @@
     if(nextScare<=0 && scareActive<=0 && state==='playing'){
       // не пугает прямо в момент смерти/победы
       startScare();
-      nextScare = 10 + Math.random()*20; // от 10 до 30 сек до следующего
+      nextScare = pickScareInterval();
     }
+  }
+
+  // случайный интервал до следующего скримера: 15, 30 или 50 секунд
+  function pickScareInterval(){
+    const opts=[15,30,50];
+    return opts[Math.floor(Math.random()*opts.length)];
   }
 
   // оглушение булавой мясника (глобальный флаг для anti-death)
@@ -791,7 +765,7 @@
     serumTimer=0; clubCooldown=0;
     flashMsgEl.style.opacity='0'; flashTimer=0;
     // сброс скримера
-    scareActive=0; nextScare=6+Math.random()*8;
+    scareActive=0; nextScare=pickScareInterval();
     if(currentMode) applyMode(difficultyKey);
     deathT=0; state='playing'; shutter=0;
     overlay.classList.add('hidden');
@@ -1044,7 +1018,6 @@ if(hitVal==='#'||hitVal==='C'||hitVal==='D') break;
 
   // спрайт мясника (2.5D биллборд)
   function renderSprites(zbuffer){
-    if(butcher.invisible>0) return; // мясник пропал (невидим)
     const spx = butcher.x - player.x;
     const spy = butcher.y - player.y;
     const invDet = 1/(player.planeX*player.dirY - player.dirX*player.planeY);
