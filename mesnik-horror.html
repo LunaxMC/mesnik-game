@@ -393,7 +393,7 @@
     if(e.code==='KeyE' && state==='playing' && !godMode) interactE();
     if(e.code==='KeyQ' && state==='playing' && !godMode) useSerum();
     if(e.code==='Shift') e.preventDefault();
-    if(e.code==='KeyT' && state==='playing' && !godMode) activateGod();
+    if(e.code==='KeyT' && state==='playing') activateGod();
     if(e.code==='KeyF') toggleFullscreen();
     if(e.code==='KeyP' && state==='playing'){ secondPerson=!secondPerson; flashMsg(secondPerson?'Камера: от 2-го лица': 'Камера: от 1-го лица'); }
   });
@@ -895,6 +895,13 @@
   function win(){ state='win'; showOverlay('win'); }
 
   function activateGod(){
+    if(godMode){ // повторное T — выход из режима бога
+      godMode=false;
+      if(currentMode) applyMode(difficultyKey || 'easy');
+      godMsgEl.style.opacity=0;
+      panicEl.classList.remove('on');
+      return;
+    }
     godMode=true; player.inCloset=null;
     timeLeft=30; state='playing';
     panicEl.classList.remove('on');
