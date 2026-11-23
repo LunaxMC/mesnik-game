@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>РАЗРУШЬ ВСЁ — пиксельный Teardown</title>
+<style>
+  :root{
+    --bg:#0a0b0e; --panel:#16181d; --line:#2a2d35; --txt:#e8e8e8; --dim:#9aa0ad;
+    --accent:#ffb347; --good:#5fe08a; --bad:#ff6b5e;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
+    font-family:"Segoe UI",system-ui,Arial,sans-serif;overflow:hidden}
+  #wrap{position:fixed;inset:0}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:crosshair}
+  .hud{position:absolute;left:16px;top:12px;font-size:15px;font-weight:600;
+    text-shadow:0 2px 6px #000;pointer-events:none;line-height:1.5;z-index:5}
+  .hud b{color:var(--accent)}
+  .hud .t{font-size:26px}
+  .hint{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);
+    background:rgba(10,11,14,.75);border:1px solid var(--line);border-radius:10px;
+    padding:8px 14px;font-size:13px;color:var(--dim);pointer-events:none;z-index:5;
+    white-space:nowrap}
+  .hint b{color:var(--txt)}
+  #overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    z-index:10;background:rgba(8,9,12,.86);backdrop-filter:blur(2px)}
+  #overlay.hidden{display:none}
+  .panel{background:linear-gradient(180deg,#1a1d23,#121419);border:1px solid var(--line);
+    border-radius:18px;padding:26px 30px;width:min(560px,92vw);max-height:92vh;overflow:auto;
+    box-shadow:0 20px 60px #000}
+  .panel h1{margin:0 0 4px;font-size:30px;letter-spacing:1px}
+  .panel h1 .bl{color:var(--bad)} .panel h1 .am{color:var(--accent)}
+  .panel p.sub{margin:0 0 16px;color:var(--dim);font-size:14px}
+  .row{display:flex;gap:10px;margin-bottom:12px}
+  .btn{flex:1;background:#20232b;border:1px solid var(--line);color:var(--txt);
+    padding:12px;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600;
+    transition:.15s;text-align:left}
+  .btn small{display:block;color:var(--dim);font-weight:400;font-size:12px;margin-top:3px}
+  .btn:hover{background:#2a2e38;border-color:var(--accent);transform:translateY(-1px)}
+  .btn.ok{background:#15321e;border-color:#256b39}
+  .btn.ok:hover{background:#1b4a2a}
+  .hint-tip{font-size:12.5px;color:var(--dim);line-height:1.7;border-top:1px solid var(--line);
+    padding-top:10px;margin-top:6px}
+  .hint-tip b{color:var(--txt)}
+  .win .bl{color:var(--good)} .dead .bl{color:var(--bad)}
+  .big{font-size:46px;text-align:center;margin:6px 0 14px;font-weight:800}
+  #mini{position:absolute;right:16px;top:12px;z-index:5;pointer-events:none;opacity:.9;
+    width:120px;height:120px;border:1px solid var(--line);border-radius:8px;background:rgba(10,11,14,.5)}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="cv"></canvas>
+  <div class="hud">
+    <div class="t"><span id="timer">1:30</span></div>
+    <div><span id="score">0</span>/<span id="target">3</span> ящиков</div>
+    <div id="msg"></div>
+  </div>
+  <div class="hint" id="hint"><b>ЛКМ</b> — ломать &nbsp;·&nbsp; <b>WASD</b> — бегать &nbsp;·&nbsp; <b>Space</b> — прыжок &nbsp;·&nbsp; <b>Shift</b> — бег &nbsp;·&nbsp; <b>R</b> — перезапуск</div>
+  <canvas id="mini"></canvas>
+</div>
+
+<div id="overlay">
+  <div class="panel">
+    <h1>РАЗРУШЬ <span class="am">ВСЁ</span></h1>
+    <p class="sub">Пиксельный «Teardown»: ломай стены, роняй конструкции, собирай <b>ящики</b> и доберись до <b>шлюза</b> до истечения времени.</p>
+    <div class="row">
+      <button class="btn ok" id="b1"><b>НОВАЯ ИГРА</b><small>карта «ЗАВОД» — 90 секунд</small></button>
+      <button class="btn ok" id="b2"><b>СКЛАД</b><small>45 секунд, больше ящиков вблизи</small></button>
+    </div>
+    <div class="row">
+      <button class="btn ok" id="b3"><b>МОСТЫ</b><small>60 секунд, два уровня обломков</small></button>
+    </div>
+    <div class="hint-tip">
+      <b>Управление:</b> ЛКМ (зажать) — крошить пиксели · <b>WASD</b> — движение · <b>Space</b> — прыжок · <b>Shift</b> — бег · <b>R</b> — новая попытка.
+      Сопровождающие куски <b>нестабильны</b>: подкопаешь опору — всё рухнет. Держи ящик слишком высоко — и он упадёт и разобьётся.
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+const mini=document.getElementById('mini'),mctx=mini.getContext('2d');
+const overlay=document.getElementById('overlay');
+const elTimer=document.getElementById('timer'),elScore=document.getElementById('score'),
+      elTarget=document.getElementById('target'),elMsg=document.getElementById('msg');
+
+let W=0,H=0,dpr=1;
+function resize(){
+  dpr=Math.min((window.devicePixelRatio||1),2);
+  W=innerWidth;H=innerHeight;
+  cv.width=W*dpr;cv.height=H*dpr;cv.style.width=W+'px';cv.style.height=H+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+addEventListener('resize',resize);resize();
+
+// ---------- фонетика звука (WebAudio) ----------
+let AC=null;
+function ac(){ if(!AC){AC=new (window.AudioContext||window.webkitAudioContext)();} if(AC.state==='suspended')AC.resume(); return AC; }
+function boomAt(x,s){
+  if(!AC)return; const t=AC.currentTime;
+  const o=AC.createOscillator(),g=AC.createGain();
+  o.type='sawtooth'; o.frequency.setValueAtTime(120*s,t);
+  o.frequency.exponentialRampToValueAtTime(30*s,t+.35);
+  g.gain.setValueAtTime(.5,t); g.gain.exponentialRampToValueAtTime(.0001,t+.4);
+  o.connect(g);g.connect(AC.destination);o.start(t);o.stop(t+.42);
+}
+function chipSound(){
+  if(!AC)return; const t=AC.currentTime;
+  const o=AC.createOscillator(),g=AC.createGain();
+  o.type='triangle'; o.frequency.setValueAtTime(2000+Math.random()*1500,t);
+  o.frequency.exponentialRampToValueAtTime(300,t+.08);
+  g.gain.setValueAtTime(.08,t); g.gain.exponentialRampToValueAtTime(.0001,t+.09);
+  o.connect(g);g.connect(AC.destination);o.start(t);o.stop(t+.1);
+}
+function collectSound(){
+  if(!AC)return; const t=AC.currentTime;
+  [660,880,1320].forEach((f,i)=>{const o=AC.createOscillator(),g=AC.createGain();
+    o.type='sine';o.frequency.value=f;
+    g.gain.setValueAtTime(.12,t+i*.07);g.gain.exponentialRampToValueAtTime(.0001,t+i*.07+.12);
+    o.connect(g);g.connect(AC.destination);o.start(t+i*.07);o.stop(t+i*.07+.13);});
+}
+function winSound(){ if(!AC)return; const t=AC.currentTime;
+  [523,659,784,1047].forEach((f,i)=>{const o=AC.createOscillator(),g=AC.createGain();
+    o.type='triangle';o.frequency.value=f;
+    g.gain.setValueAtTime(.14,t+i*.09);g.gain.exponentialRampToValueAtTime(.0001,t+i*.09+.3);
+    o.connect(g);g.connect(AC.destination);o.start(t+i*.09);o.stop(t+i*.09+.32);}); }
+function loseSound(){ if(!AC)return; const t=AC.currentTime;
+  const o=AC.createOscillator(),g=AC.createGain();
+  o.type='sawtooth';o.frequency.setValueAtTime(220,t);o.frequency.exponentialRampToValueAtTime(55,t+.8);
+  g.gain.setValueAtTime(.18,t);g.gain.exponentialRampToValueAtTime(.0001,t+.85);
+  o.connect(g);g.connect(AC.destination);o.start(t);o.stop(t+.9); }
+
+// ---------- пиксельный мир ----------
+const PP=3; // размер пикселя в px (логических)
+let cols=0,rows=0;
+let grid=[];        // cols*rows массив чисел (материал id)
+let matCol=[];      // цвет материала
+let tiles=[];       // названия материалов
+
+// материалы
+const AIR=0,STONE=1,BRICK=2,WOOD=3,METAL=4,CONCRETE=5,CRATE=6,ROCK=7;
+const SOLID=[STONE,BRICK,WOOD,METAL,CONCRETE,CRATE,ROCK];
+const HEAVY={[STONE]:1.6,[BRICK]:1.0,[WOOD]:0.7,[METAL]:1.4,[CONCRETE]:1.7,[CRATE]:0.9,[ROCK]:1.2};
+const HARDNESS={[STONE]:2.2,[BRICK]:1.3,[WOOD]:0.8,[METAL]:3.4,[CONCRETE]:3.8,[CRATE]:0.5,[ROCK]:2.6};
+
+function buildPalette(){
+  matCol[AIR]='#0f1013'; matCol[STONE]='#7a7f88';
+  matCol[BRICK]='#a04a3a'; matCol[WOOD]='#8a5a2e'; matCol[METAL]='#6d7f96';
+  matCol[CONCRETE]='#9aa0aa'; matCol[CRATE]='#c98a2e'; matCol[ROCK]='#555a63';
+  tiles=['пустота','камень','кирпич','дерево','металл','бетон','ящик','скала'];
+}
+buildPalette();
+
+function idx(x,y){ return y*cols+x; }
+function get(x,y){ if(x<0||y<0||x>=cols||y>=rows)return STONE; return grid[idx(x,y)]; }
+function set(x,y,v){ if(x>=0&&y>=0&&x<cols&&y<rows)grid[idx(x,y)]=v; }
+
+// ---------- игрок ----------
+let player={x:0,y:0,vx:0,vy:0,onGround:false,r:0.3};
+const PW=.34,PH=.7,ACC=6,GRAV=26,JUMP=9.2,RUN=1.7,WALK=1.0;
+let keys={};
+addEventListener('keydown',e=>{
+  keys[e.code]=true;
+  if(e.code==='KeyR'&&state==='play')startRun();
+});
+addEventListener('keyup',e=>keys[e.code]=false);
+
+// ---------- мир: генерация ----------
+let crates=[],doors=[],decor=[];
+let targetCount=0,planeX=0;
+let groundY=0;
+
+function carveRect(x,y,w,h,m){ for(let yy=y;yy<y+h;yy++)for(let xx=x;xx<x+w;xx++)set(xx,yy,m); }
+
+function makeMap(sel){
+  cols=240; rows=180;
+  groundY=Math.floor(rows*.92);
+  // фон (небо/воздух), земля камень
+  grid=new Array(cols*rows).fill(AIR);
+  for(let x=0;x<cols;x++) for(let y=groundY;y<rows;y++) set(x,y,STONE);
+  crates=[];doors=[];decor=[];
+  targetCount=3; planeX=cols-3;
+
+  if(sel==='b1'){ buildFactory(); }
+  else if(sel==='b2'){ buildWarehouse(); }
+  else if(sel==='b3'){ buildBridges(); }
+
+  // игрок слева на земле
+  player.x=2+0.3; player.y=groundY-PH-0.02; player.vx=0;player.vy=0;
+}
+
+function boxSolid(x,y,w,h,m,weight,crate){
+  if(crate){
+    // ящик как сущность: не крошится в сетку, падает на твёрдые клетки
+    crates.push({x:x+w/2, y:y+h, w:w, h:h, taken:false});
+    return;
+  }
+  carveRect(x,y,w,h,m);
+}
+
+function buildFactory(){
+  // корпус из кирпича с бетонной рамой
+  carveRect(20,groundY-18,60,18,BRICK);
+  carveRect(20,groundY-18,60,3,CONCRETE);
+  // окна (дыры)
+  for(let wx=28;wx<70;wx+=8){ carveRect(wx,groundY-13,3,6,AIR); }
+  // дверь слева
+  carveRect(23,groundY-6,4,6,AIR);
+  doors.push({x:23,y:groundY-6,w:4,h:6});
+  // деревянные балки-перекрытия (нестабильны! балка держит ящик)
+  carveRect(30,groundY-16,30,1,WOOD);
+  // ящик внутри на балке
+  boxSolid(38,groundY-19,3,3,CRATE,undefined,true);
+  // металлическая бочка
+  carveRect(56,groundY-14,3,4,METAL);
+  // шлюз (экстракт) справа
+  carveRect(planeX*1-6, groundY-10, 2,10,CONCRETE);
+  carveRect(planeX*1+6, groundY-10, 2,10,CONCRETE);
+  planeX=planeX*1;
+  targetCount=3;
+  // ещё 2 ящика на полу
+  boxSolid(45,groundY-3,3,3,CRATE,undefined,true);
+  boxSolid(80,groundY-3,3,3,CRATE,undefined,true);
+}
+
+function buildWarehouse(){
+  // большие бетонные колонны
+  for(let x=20;x<180;x+=24){ carveRect(x,groundY-14,3,14,CONCRETE); }
+  // металлические стены-перегородки (тонкие)
+  carveRect(70,groundY-8,40,1,METAL);
+  carveRect(70,groundY-8,1,8,METAL);
+  carveRect(108,groundY-8,40,1,METAL);
+  carveRect(147,groundY-8,1,8,METAL);
+  // ящики на полу и на перегородке
+  boxSolid(30,groundY-3,3,3,CRATE,undefined,true);
+  boxSolid(74,groundY-10,3,3,CRATE,undefined,true);
+  boxSolid(110,groundY-3,3,3,CRATE,undefined,true);
+  targetCount=3;
+  planeX=cols-6;
+  carveRect(planeX-4,groundY-12,8,1,METAL);
+  carveRect(planeX-5,groundY-12,1,12,METAL);
+  carveRect(planeX+4,groundY-12,1,12,METAL);
+}
+
+function buildBridges(){
+  // два пролёта моста из досок над канавой
+  carveRect(0,groundY-16,80,1,WOOD);
+  carveRect(80,groundY-16,80,1,WOOD);
+  // опоры-балки (держат мост)
+  for(let x=15;x<160;x+=30){ carveRect(x,groundY-16,2,16,WOOD); }
+  carveRect(40,groundY-16,2,16,WOOD);
+  // средняя секция без опоры — хрупкая
+  // ящики на мосту
+  boxSolid(20,groundY-19,3,3,CRATE,undefined,true);
+  boxSolid(120,groundY-19,3,3,CRATE,undefined,true);
+  boxSolid(70,groundY-3,3,3,CRATE,undefined,true);
+  targetCount=3;
+  planeX=cols-6;
+  carveRect(planeX-5,groundY-12,10,1,CONCRETE);
+  carveRect(planeX-6,groundY-12,1,12,CONCRETE);
+  carveRect(planeX+4,groundY-12,1,12,CONCRETE);
+}
+
+// ---------- разрушение ----------
+let hammerR=1.6; // радиус молота в пикселях мира
+
+function shatterArea(cx,cy,r,power){
+  let any=false;
+  for(let yy=Math.floor(cy-r);yy<=Math.floor(cy+r);yy++)
+   for(let xx=Math.floor(cx-r);xx<=Math.floor(cx+r);xx++){
+     const dx=xx+.5-cx,dy=yy+.5-cy;
+     if(dx*dx+dy*dy>r*r)continue;
+     const m=get(xx,yy);
+     if(m!==AIR&&SOLID.includes(m)){
+       const hardness=HARDNESS[m];
+       if(Math.floor(hardness)<=power){ set(xx,yy,AIR); any=true;
+         spawnDebris((xx+.5)*PP,(yy+.5)*PP,m,0);
+       }
+     }
+   }
+  if(any)chipSound();
+  return any;
+}
+
+// обломки (маленькие частицы)
+let debris=[];
+function spawnDebris(px,py,m,cnt){
+  cnt=cnt||4;
+  for(let i=0;i<cnt;i++){
+    debris.push({x:px,y:py,vx:(Math.random()-0.5)*6,vy:-Math.random()*5-1,
+      r:(Math.random()*.7+0.4)*PP,life:0,maxLife:.7+.6*Math.random(),
+      c:matCol[m]});
+  }
+}
+
+// ---------- физика обломков и гравитации пикселя ----------
+// простая: пиксели "падают" вниз, если под ними пусто, но это супермедленно
+// делаем физику "хрупких конструкций" через падение групп (нестабильность)
+function pixelFalls(x,y){
+  if(get(x,y)===AIR)return false;
+  // опора: пиксель снизу или по диагонали внизу - твёрдый
+  const b=get(x,y+1);
+  if(SOLID.includes(b)||b===STONE)return false;
+  const bl=get(x-1,y+1),br=get(x+1,y+1);
+  if((SOLID.includes(bl)&&SOLID.includes(br)))return false;
+  // если сверху есть поддержка — тоже держим (это обломок)
+  return true;
+}
+
+// примитивная, но зрелищная гравитация: пиксели вниз со скоростью
+let falling=[];
+function physicsStep(dt){
+  falling.length=0;
+  // ищем "свободные" пиксели и двигаем их вниз (стеки стабильны)
+  for(let y=rows-2;y>=0;y--){
+    for(let x=0;x<cols;x++){
+      const m=get(x,y);
+      if(!SOLID.includes(m))continue;
+      if(get(x,y+1)!==AIR)continue;
+      // нестабилен: падает, увлекая то, что сверху
+      const below=get(x,y+1);
+      falling.push({x,y,m});
+    }
+  }
+  // падаем с ограничением колонн: не падать сквозь стоящие
+  // (простейший вариант: падение одного уровня за шаг, но не всё разом)
+}
+
+// анкерная физика: конструкция стоит, пока где-то касается камня (грунта).
+// Сломал опору -> кластер теряет связь с грунтом -> падает. Так и выходит "подкопал - рухнуло".
+const ANCH_DIRS=[[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+function stabilityStep(dt){
+  const anchored=new Uint8Array(cols*rows);
+  const stack=[];
+  for(let x=0;x<cols;x++){
+    if(get(x,groundY)===STONE){ const i=idx(x,groundY); anchored[i]=1; stack.push(i); }
+  }
+  while(stack.length){
+    const i=stack.pop();
+    const y=(i/cols)|0, x=i-y*cols;
+    for(let d=0;d<8;d++){
+      const nx=x+ANCH_DIRS[d][0], ny=y+ANCH_DIRS[d][1];
+      if(nx<0||ny<0||nx>=cols||ny>=rows)continue;
+      const ni=idx(nx,ny); const m=get(nx,ny);
+      if(m!==AIR&&SOLID.includes(m)&&!anchored[ni]){ anchored[ni]=1; stack.push(ni); }
+    }
+  }
+  for(let y=rows-2;y>=0;y--){
+    for(let x=0;x<cols;x++){
+      const m=get(x,y);
+      if(m===AIR||!SOLID.includes(m))continue;
+      if(get(x,y+1)===AIR && !anchored[idx(x,y)]){
+        set(x,y,AIR); set(x,y+1,m);
+        if(Math.random()<0.15) spawnDebris((x+.5)*PP,(y+.5)*PP,m,1);
+      }
+    }
+  }
+}
+
+// ---------- камера ----------
+let cam={x:0,y:0,zoom:0.5};
+function px2world(px,py){
+  return {x:px/cam.zoom+cam.x, y:py/cam.zoom+cam.y};
+}
+function world2px(wx,wy){
+  return {x:(wx-cam.x)*cam.zoom, y:(wy-cam.y)*cam.zoom};
+}
+
+// ---------- игровой цикл ----------
+let state='menu'; let timeLeft=90; let last=performance.now();
+
+function resetCamera(targetX,targetY){
+  cam.x=Math.max(0,Math.min(targetX-W/(2*cam.zoom),cols*PP-W/cam.zoom));
+  cam.y=Math.max(0,Math.min(targetY-H/(2*cam.zoom),rows*PP-H/cam.zoom));
+}
+
+function startRun(){
+  timeLeft= (currentMap==='b2')?45:(currentMap==='b3'?60:90);
+  state='play'; last=performance.now();
+  overlay.classList.add('hidden');
+  updateTarget();
+  elMsg.textContent='Доберись до шлюза!';
+  elMsg.style.color='';
+}
+let currentMap='b1';
+
+function updateTarget(){ elTarget.textContent=CrateRemaining(); }
+
+function CrateRemaining(){ return crates.filter(c=>!c.taken).length; }
+
+// восприятие времени игры
+function update(dt){
+  if(state!=='play')return;
+  timeLeft-=dt;
+  if(timeLeft<=0){ timeLeft=0; lose('ВРЕМЯ ВЫШЛО'); return; }
+  updateTimer();
+
+  // движение игрока
+  let dirx=0;
+  if(keys['KeyA']||keys['ArrowLeft'])dirx-=1;
+  if(keys['KeyD']||keys['ArrowRight'])dirx+=1;
+  const run = keys['ShiftLeft']||keys['ShiftRight'];
+  const spd = ACC*(run?RUN:WALK);
+  player.vx += dirx*spd*dt;
+  player.vx *= Math.pow(0.2,dt); // трение
+
+  if((keys['Space']||keys['ArrowUp'])&&player.onGround){ player.vy=-JUMP; player.onGround=false; }
+  player.vy += GRAV*dt;
+
+  // горизонтальное столкновение
+  player.x += player.vx*dt;
+  resolvePlayerAABB(false);
+  player.y += player.vy*dt;
+  resolvePlayerAABB(true);
+
+  // стабильность мира
+  stabilityStep(dt);
+  updateDebris(dt);
+
+  // ящики: если под ними пусто и земля не башня — падают
+  for(const c of crates){
+    if(c.taken)continue;
+    // падение крата
+    const bx=Math.floor(c.x), by=Math.floor(c.y);
+    let support=false;
+    for(let dx=-Math.ceil(c.w/2);dx<=Math.floor(c.w/2)&&!support;dx++){
+      const under=get(bx+dx, by);
+      if(SOLID.includes(under)){support=true;break;}
+      const undr2=get(bx+dx,by+1);
+      if(SOLID.includes(undr2)){support=true;break;}
+    }
+    if(!support){
+      // падает вниз, пока не упрётся в твёрдое
+      c.y += dt*10;
+      const fy=Math.floor(c.y);
+      for(let dx=-Math.ceil(c.w/2);dx<=Math.floor(c.w/2);dx++){
+        if(SOLID.includes(get(bx+dx, fy))){ c.y=fy; break; }
+      }
+    }else{
+      // спокойно лежит на опоре (ничего не сдвигать — иначе тонет в грунт)
+    }
+    // проверка сбора (игрок касается крата)
+    if(!c.taken){
+      const dx=player.x-c.x,dy=(player.y)-c.y;
+      if(Math.abs(dx)<0.7&&Math.abs(dy)<0.8){
+        c.taken=true; collectSound();
+        updateTarget();
+        if(CrateRemaining()===0){ win(); }
+      }
+    }
+  }
+
+  // камера следует
+  const cx=player.x*PP, cy=player.y*PP;
+  cam.x=Math.max(0,Math.min(cx-W/(2*cam.zoom), cols*PP-W/cam.zoom));
+  cam.y=Math.max(0,Math.min(cy-H/(2*cam.zoom), rows*PP-H/cam.zoom));
+
+  // молот (зажатая ЛКМ)
+  if(mouseDown){ doHammer(); }
+}
+
+function resolvePlayerAABB(vertical){
+  const x0=player.x-player.r, x1=player.x+player.r;
+  const y0=player.y-PH, y1=player.y;
+  if(vertical){
+    if(player.vy>0){
+      const yNext=y1+player.vy*0.016;
+      let hit=false;
+      for(let xx=Math.floor(x0);xx<=Math.floor(x1);xx++){
+        if(SOLID.includes(get(xx, Math.floor(yNext)))){
+          if(!hit){
+            player.y=Math.floor(yNext);player.vy=0;player.onGround=true;hit=true;
+          }
+        }
+      }
+    }else if(player.vy<0){
+      const yNext=y0+player.vy*0.016;
+      let hit=false;
+      for(let xx=Math.floor(x0);xx<=Math.floor(x1);xx++){
+        if(SOLID.includes(get(xx, Math.floor(yNext)))){
+          if(!hit){ player.y=Math.floor(yNext)+PH+0.001; player.vy=0; hit=true;}
+        }
+      }
+    }
+    player.onGround=false;
+    // повторная проверка опоры
+    for(let xx=Math.floor(x0);xx<=Math.floor(x1);xx++){
+      if(SOLID.includes(get(xx, Math.floor(player.y+0.05)))){player.onGround=true;break;}
+    }
+  }else{
+    // горизонтальное: check left/right
+    if(player.vx>0){
+      const xNext=x1+player.vx*0.016;
+      for(let yy=Math.floor(y0);yy<=Math.floor(y1);yy++){
+        if(SOLID.includes(get(Math.floor(xNext), yy))){ player.x=Math.floor(xNext)-player.r-0.001; player.vx=0; break;}
+      }
+    }else if(player.vx<0){
+      const xNext=x0+player.vx*0.016;
+      for(let yy=Math.floor(y0);yy<=Math.floor(y1);yy++){
+        if(SOLID.includes(get(Math.floor(xNext), yy))){ player.x=Math.floor(xNext)+player.r+0.001; player.vx=0; break;}
+      }
+    }
+  }
+}
+
+function updateDebris(dt){
+  for(let i=debris.length-1;i>=0;i--){
+    const d=debris[i];
+    d.vy+=20*dt; d.x+=d.vx*dt; d.y+=d.vy*dt;
+    if(d.y>rows*PP+10){debris.splice(i,1);continue;}
+    d.life+=dt;
+    if(d.life>d.maxLife)debris.splice(i,1);
+  }
+}
+
+let mouseDown=false;
+cv.addEventListener('mousedown',e=>{ if(state!=='play')return; mouseDown=true; ac(); doHammer(); });
+addEventListener('mouseup',()=>mouseDown=false);
+
+let mouseX=0,mouseY=0;
+cv.addEventListener('mousemove',e=>{
+  const r=cv.getBoundingClientRect();
+  mouseX=e.clientX-r.left; mouseY=e.clientY-r.top;
+});
+
+function doHammer(){
+  const w=px2world(mouseX,mouseY);
+  shatterArea(w.x,w.y,hammerR,6);
+}
+
+// ---------- рендер ----------
+function fillText(txt,x,y,c,size){
+  ctx.font=(size||14)+'px "Segoe UI",Arial';ctx.textAlign='left';ctx.textBaseline='top';
+  ctx.fillStyle=c;ctx.fillText(txt,x,y);
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+
+  // небо фон
+  const grd=ctx.createLinearGradient(0,0,0,H);
+  grd.addColorStop(0,'#0c0e13');grd.addColorStop(.5,'#15181f');grd.addColorStop(1,'#0f1116');
+  ctx.fillStyle=grd;ctx.fillRect(0,0,W,H);
+
+  ctx.save();
+  ctx.translate(-cam.x*cam.zoom, -cam.y*cam.zoom);
+  ctx.scale(cam.zoom,cam.zoom);
+
+  // пиксельный мир
+  const x0=Math.max(0,Math.floor(cam.x/PP));
+  const x1=Math.min(cols,Math.ceil((cam.x+W/cam.zoom)/PP));
+  const y0=Math.max(0,Math.floor(cam.y/PP));
+  const y1=Math.min(rows,Math.ceil((cam.y+H/cam.zoom)/PP));
+  for(let y=y0;y<y1;y++){
+    for(let x=x0;x<x1;x++){
+      const m=get(x,y);
+      if(m!==AIR){
+        ctx.fillStyle=matCol[m];
+        ctx.fillRect(x*PP,y*PP,PP,PP);
+        // лёгкая тень сверху для глубины
+        ctx.fillStyle='rgba(0,0,0,.14)';
+        ctx.fillRect(x*PP,y*PP,PP,1);
+      }
+    }
+  }
+
+  // шлюз (экстракт)
+  drawPlane();
+
+  // ящики
+  for(const c of crates){
+    if(c.taken)continue;
+    ctx.fillStyle=matCol[CRATE];
+    const bx=c.x*PP-c.w/2*PP, by=c.y*PP;
+    ctx.fillRect(bx,by,c.w*PP,0.5*PP);
+    ctx.fillStyle='#a05e14';
+    ctx.fillRect(bx,by-3, c.w*PP, 3);
+    ctx.fillStyle='#fff';
+    ctx.fillRect(bx+c.w/2*PP-1, by-3, 2, 3);
+  }
+
+  // обломки
+  for(const d of debris){
+    ctx.globalAlpha=Math.max(0,1-d.life/d.maxLife);
+    ctx.fillStyle=d.c;
+    ctx.fillRect(d.x-d.r/2,d.y-d.r/2,d.r,d.r);
+  }
+  ctx.globalAlpha=1;
+
+  // игрок
+  drawPlayer();
+
+  ctx.restore();
+
+  // цветок под сообщением
+  updateTimerText();
+}
+
+function drawPlane(){
+  // колонны шлюза
+  const px=(planeX)*PP;
+  ctx.fillStyle='#2a3a4a';
+  for(let dx=0;dx<8;dx+=7){
+    ctx.fillRect(px+dx*PP, groundY*PP-12*PP, 3*PP, 12*PP);
+  }
+  ctx.fillStyle='#3a5a6a';
+  ctx.fillRect(px-2*PP, groundY*PP-14*PP, 12*PP, 2*PP);
+  ctx.fillStyle='#7fe08a';
+  ctx.fillRect(px+1*PP, groundY*PP-16*PP, 8*PP, 1.2*PP);
+  fillText('ШЛЮЗ', px, groundY*PP-20, '#8fe89a', 11);
+}
+
+function drawPlayer(){
+  const px=player.x*PP, py=player.y*PP;
+  const w=PW*PP,h=PH*PP;
+  // тень
+  ctx.fillStyle='rgba(0,0,0,.4)';
+  ctx.beginPath();ctx.ellipse(px,py+1, w*.7, 2, 0,0,7);ctx.fill();
+  // тело
+  ctx.fillStyle='#ffb347';
+  ctx.fillRect(px-w/2, py-h, w, h);
+  // голова
+  ctx.fillStyle='#e0a34a';
+  ctx.beginPath();ctx.arc(px, py-h-2, 2.6, 0, 7);ctx.fill();
+  // глаза
+  ctx.fillStyle='#000';
+  ctx.fillRect(px-1, py-h-3, 1.4, 1.6);
+  ctx.fillRect(px+1, py-h-3, 1.4, 1.6);
+}
+
+function updateTimer(){
+  const m=Math.floor(timeLeft/60), s=Math.floor(timeLeft%60);
+  elTimer.textContent=m+':'+(s<10?'0':'')+s;
+  if(timeLeft<10){
+    elTimer.style.color='#ff6b5e';
+  }else elTimer.style.color='';
+}
+
+function updateTimerText(){ /* noop */ }
+
+function lose(reason){
+  state='lose'; mouseDown=false; loseSound();
+  showEnd(false, reason);
+}
+function win(){
+  state='win'; mouseDown=false; winSound();
+  showEnd(true,'');
+}
+function CrateCollected(){ return crates.filter(c=>c.taken).length; }
+
+function showEnd(isWin,reason){
+  overlay.classList.remove('hidden');
+  overlay.innerHTML = `
+  <div class="panel ${isWin?'win':'dead'}">
+    <div class="big">${isWin?'ПОБЕДА':'ПРОВАЛ'}</div>
+    <p class="sub" style="text-align:center">${isWin?'Все ящики собраны, шлюз открыт!':'Время вышло — шлюз закрыт.'}</p>
+    <p class="sub" style="text-align:center;font-size:15px">Ящиков собрано: <b>${CrateCollected()}/${targetCount}</b></p>
+    <button class="btn ok" style="width:100%" onclick="restart()"><b>ЕЩЁ РАЗ</b><small>та же карта</small></button>
+    <button class="btn" style="width:100%;margin-top:8px" onclick="toMenu()"><b>В МЕНЮ</b><small>выбрать карту</small></button>
+  </div>`;
+}
+
+function restart(){ startRun(); }
+function toMenu(){ showMenu(); }
+
+function showMenu(){
+  state='menu'; mouseDown=false; timeLeft=90;
+  overlay.classList.remove('hidden');
+  overlay.innerHTML = `
+  <div class="panel">
+    <h1>РАЗРУШЬ <span class="am">ВСЁ</span></h1>
+    <p class="sub">Пиксельный «Teardown»: ломай стены, роняй конструкции, собирай <b>ящики</b> и доберись до <b>шлюза</b>.</p>
+    <div class="row">
+      <button class="btn ok" id="b1"><b>ЗАВОД</b><small>90 сек · кирпич, балки, 3 ящика</small></button>
+      <button class="btn ok" id="b2"><b>СКЛАД</b><small>45 сек · бетон, башни, 3 ящика</small></button>
+    </div>
+    <div class="row">
+      <button class="btn ok" id="b3"><b>МОСТЫ</b><small>60 сек · два уровня, 3 ящика</small></button>
+    </div>
+    <div class="hint-tip">
+      <b>Управление:</b> ЛКМ (зажать) — крошить пиксели · <b>WASD</b> — движение · <b>Space</b> — прыжок · <b>Shift</b> — бег · <b>R</b> — новая попытка.<br><br>
+      Сопровождающие куски <b>нестабильны</b>: подкопаешь опору — всё рухнет. Держи ящик слишком высоко — и он упадёт и разобьётся.
+    </div>
+  </div>`;
+  document.getElementById('b1').onclick=()=>launch('b1');
+  document.getElementById('b2').onclick=()=>launch('b2');
+  document.getElementById('b3').onclick=()=>launch('b3');
+}
+function launch(sel){
+  currentMap=sel;
+  makeMap(sel);
+  resetCamera(player.x*PP, player.y*PP);
+  startRun();
+}
+
+// подсказка скрываем при игре
+function loop(now){
+  const dt=Math.min((now-last)/1000, .04);
+  last=now;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ---------- старт ----------
+makeMap('b1');
+resetCamera(player.x*PP, player.y*PP);
+showMenu();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
