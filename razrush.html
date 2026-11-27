@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>РАЗРУШЬ ВСЁ — пиксельный Teardown</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <style>
   :root{
     --bg:#0a0b0e; --panel:#16181d; --line:#2a2d35; --txt:#e8e8e8; --dim:#9aa0ad;
@@ -59,7 +60,16 @@
   </div>
   <div class="hint" id="hint"><b>ЛКМ</b> — ломать &nbsp;·&nbsp; <b>WASD</b> — бегать &nbsp;·&nbsp; <b>Space</b> — прыжок &nbsp;·&nbsp; <b>Shift</b> — бег &nbsp;·&nbsp; <b>R</b> — перезапуск</div>
   <canvas id="mini"></canvas>
+  <div id="scareBox"><img id="scareImg" alt=""><div id="scareStun" class="stun"></div></div>
+  <div id="mpStatus" class="mp"></div>
 </div>
+<style>
+  #scareBox{position:absolute;inset:0;pointer-events:none;z-index:20;display:none;align-items:center;justify-content:center;background:#000}
+  #scareBox.show{display:flex}
+  #scareImg{max-width:100%;max-height:100%;transform-origin:center;image-rendering:pixelated}
+  #scareStun{display:none}
+  #mpStatus{position:absolute;right:16px;top:44px;z-index:6;font-size:12px;color:#5fe08a;background:rgba(10,11,14,.7);padding:6px 10px;border-radius:8px;border:1px solid #2a2d35;pointer-events:none}
+</style>
 
 <div id="overlay">
   <div class="panel">
@@ -132,6 +142,94 @@ function loseSound(){ if(!AC)return; const t=AC.currentTime;
   o.type='sawtooth';o.frequency.setValueAtTime(220,t);o.frequency.exponentialRampToValueAtTime(55,t+.8);
   g.gain.setValueAtTime(.18,t);g.gain.exponentialRampToValueAtTime(.0001,t+.85);
   o.connect(g);g.connect(AC.destination);o.start(t);o.stop(t+.9); }
+
+// ---------- скримеры ----------
+const scareBox=document.getElementById('scareBox'),
+      scareImg=document.getElementById('scareImg');
+let scareTimer=null;
+let scareMode='proc';       // 'proc' - процессurные, 'files' - кадры из /scares/
+let scareFiles={list:[],loaded:0};
+const SCARE_INTERVAL=[6000,10000,22000]; // случайные интервалы скримера (мс)
+
+function scareSound(){
+  if(!AC)return; const t=AC.currentTime;
+  const buf=AC.createBuffer(1,AC.sampleRate*.35,AC.sampleRate);
+  const d=buf.getChannelData(0);
+  for(let i=0;i<d.length;i++){
+    const r=Math.random()*2-1;
+    d[i]=(r*0.7 + Math.sin(i*0.15)*0.5) * (1-i/d.length);
+  }
+  const src=AC.createBufferSource();src.buffer=buf;
+  const g=AC.createGain();g.gain.value=.9;
+  src.connect(g);g.connect(AC.destination);src.start(t);
+}
+function drawScareFace(c,faceIndex){
+  const w=c.width,h=c.height;
+  // страшная рожа: бледная с чёрными провалами
+  c.fillStyle='#0a0b0e';c.fillRect(0,0,w,h);
+  const cx=w/2,cy=h/2, s=Math.min(w,h);
+  c.fillStyle='#dfe3e8';
+  c.beginPath();c.ellipse(cx,cy,s*.28,s*.36,0,0,7);c.fill();
+  // глаза
+  c.fillStyle='#000'; c.beginPath();c.arc(cx-s*.13,cy-s*.09,s*.06,0,7);c.fill();
+  c.arc(cx+s*.13,cy-s*.09,s*.06,0,7);c.fill();
+  // рот
+  c.beginPath();c.arc(cx,cy+s*.12,s*.09,0,7);c.fill();
+  // царапины
+  c.strokeStyle='#7a1f1f';c.lineWidth=Math.max(2,s*.012);
+  for(let i=0;i<6;i++){ const a=i/6*6.28, r=s*.2+Math.random()*s*.12;
+    c.beginPath();c.moveTo(cx,cy);c.lineTo(cx+Math.cos(a)*r,cy+Math.sin(a)*r);c.stroke(); }
+}
+function makeScareFromFiles(){
+  const list=scareFiles.list;
+  if(list.length===0)return null;
+  const src=list[Math.floor(Math.random()*list.length)];
+  scareImg.src=src; return src;
+}
+function triggerScare(){
+  if(state!=='play'||scareTimer)return;
+  scareBox.classList.add('show');
+  // процессurный кадр или файл
+  let useFile=false;
+  if(scareMode==='files'&&scareFiles.list.length){
+    makeScareFromFiles(); useFile=true;
+  }
+  if(!useFile){
+    const c=document.createElement('canvas');
+    c.width=512;c.height=512; drawScareFace(c.getContext('2d'),0);
+    scareImg.src=c.toDataURL();
+  }
+  // тряска
+  scareImg.style.animation='shake .6s linear';
+  setTimeout(()=>scareImg.style.animation='',650);
+  scareSound();
+  // стаз: блок на 0.8 сек
+  const wasDown=mouseDown; mouseDown=false;
+  window.setTimeout(()=>{ if(state==='play')mouseDown=wasDown; },800);
+  window.setTimeout(()=>{ scareBox.classList.remove('show'); 
+    clearTimeout(scareTimer); scareTimer=null;
+  }, 900);
+  scareTimer=setTimeout(()=>{},1000);
+}
+
+// случайный интервал скримера в игре
+function scheduleScare(){
+  if(state!=='play'){ window.setTimeout(scheduleScare,1000); return; }
+  const iv=SCARE_INTERVAL[Math.floor(Math.random()*SCARE_INTERVAL.length)];
+  window.setTimeout(()=>{ if(state==='play')triggerScare(); scheduleScare(); }, iv);
+}
+// првоерка папки /scares/ при старте
+function loadScaresFromFolder(){
+  // GitHub Pages отдаёт index.json если он есть; пробуем загрузить список
+  fetch('scares/index.json').then(r=>r.json()).then(list=>{
+    if(Array.isArray(list)&&list.length){
+      scareFiles.list=list.map(f=>'scares/'+f);
+      scareMode='files';
+      // тёплый старт: прелоадим
+      scareFiles.loaded=scareFiles.list.length;
+    }
+  }).catch(()=>{ scareMode='proc'; });
+}
 
 // ---------- пиксельный мир ----------
 const PP=3; // размер пикселя в px (логических)
@@ -680,14 +778,17 @@ function showMenu(){
     <div class="row">
       <button class="btn ok" id="b3"><b>МОСТЫ</b><small>60 сек · два уровня, 3 ящика</small></button>
     </div>
+    <div class="row mpmenu" id="mpMenu"></div>
     <div class="hint-tip">
-      <b>Управление:</b> ЛКМ (зажать) — крошить пиксели · <b>WASD</b> — движение · <b>Space</b> — прыжок · <b>Shift</b> — бег · <b>R</b> — новая попытка.<br><br>
-      Сопровождающие куски <b>нестабильны</b>: подкопаешь опору — всё рухнет. Держи ящик слишком высоко — и он упадёт и разобьётся.
+      <b>Управление:</b> ЛКМ (зажать) — крошить пиксели · <b>WASD</b> — движение · <b>Space</b> — прыжок · <b>Shift</b> — бег · <b>R</b> — новая попытка.<br>
+      <b>Онлайн:</b> создай лобби и скинь другу код, он зайдёт, вы вместе в одном мире и в скримеры сиаритесь сразу у всех.<br>
+      <b>Свои скримеры:</b> положи кадры в папку <b>scares/</b> и пропиши список в <b>scares/index.json</b>.
     </div>
   </div>`;
   document.getElementById('b1').onclick=()=>launch('b1');
   document.getElementById('b2').onclick=()=>launch('b2');
   document.getElementById('b3').onclick=()=>launch('b3');
+  renderMpMenu();
 }
 function launch(sel){
   currentMap=sel;
@@ -696,11 +797,86 @@ function launch(sel){
   startRun();
 }
 
-// подсказка скрываем при игре
+// ---------- онлайн (PeerJS) ----------
+let peer=null, mpConn=null, mpId='', mpPeers={}, mpSelf={}, mpHud=null,
+    mpState='off', mpLoop=0, myNick='';
+const mpStatusEl=document.getElementById('mpStatus');
+let MP_LIST=[];
+function mpNick(){
+  return (localStorage.getItem('msn_nick')||'Игрок').slice(0,18)||'Гость';
+}
+function translit(s){
+  const m={'а':'a','б':'b','в':'v','г':'g','д':'d','е':'e','ё':'yo','ж':'zh','з':'z','и':'i','й':'y','к':'k','л':'l','м':'m','н':'n','о':'o','п':'p','р':'r','с':'s','т':'t','у':'u','ф':'f','х':'h','ц':'c','ч':'ch','ш':'sh','щ':'sch','ъ':'','ы':'y','ь':'','э':'e','ю':'yu','я':'ya'};
+  return s.toLowerCase().replace(/[а-яё]/g,ch=>m[ch]||ch).replace(/[^a-z0-9]/g,'');
+}
+function renderMpMenu(){
+  const mm=document.getElementById('mpMenu'); if(!mm)return;
+  const isHost=mpState==='host', isGuest=mpState==='guest';
+  mm.innerHTML=`
+    ${!isHost&&!isGuest?`<button class="btn" id="mpCreate"><b>Онлайн: создать лобби</b><small>жди друзей по коду</small></button>
+     <button class="btn" id="mpJoin"><b>Онлайн: ввести код</b><small>присоединиться к другу</small></button>
+     <div style="flex-basis:100%"></div>
+     <input id="mpCodeInput" placeholder="код лобби (например abcd)" style="width:100%;padding:9px;border-radius:8px;border:1px solid #2a2d35;background:#20232b;color:#e8e8e8;font-size:13px">`:
+     `${isHost?'<div class="mpInfo"><b>Ты хост.</b> Код лобби: <span id="mpCodeShow"></span></div>':''}`}
+  `;
+  const cr=document.getElementById('mpCreate'); if(cr)cr.onclick=()=>mpCreate();
+  const jn=document.getElementById('mpJoin'); if(jn)jn.onclick=()=>mpJoin();
+  if(isHost){ const cc=document.getElementById('mpCodeShow'); if(cc)cc.textContent=mpId; }
+}
+function mpStatus(txt,c){
+  if(mpStatusEl){ mpStatusEl.textContent=txt; mpStatusEl.style.color=c||'#5fe08a'; }
+}
+function mpCreate(){
+  if(typeof Peer==='undefined'){ mpStatus('PeerJS недоступен (нет сети)','#ff6b5e'); return; }
+  mpId=translit(mpNick()).replace(/[^a-z0-9]/g,''); if(mpId.length<3)mpId='host'+Math.floor(Math.random()*9999);
+  peer=new Peer(mpId);
+  peer.on('open',()=>{ mpState='host'; mpConn=null; mpStatus('Лобби создано. Код: '+mpId); renderMpMenu();
+    peer.on('connection',conn=>{
+      conn.on('data',d=>onMpData(conn,d)); conn.on('open',()=>{ mpPeers[conn.peer]=conn; mpStatus('Игрок '+conn.peer+' в игре!'); });
+      conn.on('close',()=>{ delete mpPeers[conn.peer]; });
+    });
+  });
+  peer.on('error',e=>mpStatus('Ошибка: '+e.type,'#ff6b5e'));
+}
+function mpJoin(){
+  const inp=document.getElementById('mpCodeInput'); const code=(inp&&inp.value)?inp.value.trim():'';
+  if(!code){ mpStatus('Введи код лобби','#ffb347'); return; }
+  if(typeof Peer==='undefined'){ mpStatus('PeerJS недоступен','#ff6b5e'); return; }
+  peer=new Peer(translit(mpNick()).replace(/[^a-z0-9]/g,'')+Math.floor(Math.random()*9999));
+  peer.on('open',()=>{
+    const c=peer.connect(translit(code));
+    c.on('open',()=>{ mpState='guest'; mpConn=c; mpStatus('Подключено к '+code); renderMpMenu(); });
+    c.on('data',d=>onMpData(c,d));
+    c.on('close',()=>{ mpState='off'; mpStatus('Отключено','#ff6b5e'); renderMpMenu(); });
+  });
+  peer.on('error',()=>mpStatus('Не удалось подключиться','#ff6b5e'));
+}
+function onMpData(conn,d){
+  // данные: {t:'pos',x,y},
+  if(d&&d.t==='scare'){ triggerScare(); return; }
+  if(d&&d.t==='pos'&&conn==null){} //guest
+  else if(d&&d.t==='pos'){ mpPeers[d.id]=d; }
+}
+function mpSync(dt){
+  mpLoop+=dt;
+  if(mpState==='host'&&mpLoop>.1){
+    // рассылаем позиции и счёт
+    const packet={t:'pos',id:peer._id,x:player.x,y:player.y,nick:mpNick()};
+    for(const k in mpPeers){ try{ mpPeers[k].send(packet); }catch(e){} }
+    mpLoop=0;
+  }
+}
+// простой vs-скример: если хост запустил скример посылаем всем
+function mpSendScare(){ if(mpState==='host'){ for(const k in mpPeers){ try{ mpPeers[k].send({t:'scare'}); }catch(e){} } } }
+function initScareLoop(){
+  loadScaresFromFolder();
+  scheduleScare();
+}
 function loop(now){
   const dt=Math.min((now-last)/1000, .04);
   last=now;
   update(dt);
+  mpSync(dt);
   draw();
   requestAnimationFrame(loop);
 }
@@ -709,6 +885,7 @@ function loop(now){
 makeMap('b1');
 resetCamera(player.x*PP, player.y*PP);
 showMenu();
+initScareLoop();
 requestAnimationFrame(loop);
 </script>
 </body>
